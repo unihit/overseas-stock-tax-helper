@@ -303,16 +303,16 @@ export function extractKrwAmounts(line: string): number[] {
   let normalized = line.replace(/(\d)[.,]\s+(\d{3})\b/g, '$1,$2');
 
   // 2) OCR에서 천단위 콤마(',')가 마침표('.')로 인식된 경우(예: 5.107.437, 2.395.967, 1,720.275, 66.438) 복원
-  // 소수점 뒤가 정확히 3자리이고 그 뒤에 다른 숫자가 이어지지 않는 패턴만 콤마로 치환 (4자리 수량 0.0000, 2자리 환율 1,428.40 등은 유지)
+  // 주의: 0.0000이 0.000으로 읽힌 경우를 원화로 오인하지 않도록 맨 앞자리는 반드시 1~9([1-9])여야 함
   normalized = normalized.replace(
-    /\b(\d{1,3})[.,](\d{3})[.,](\d{3})\b/g,
+    /\b([1-9]\d{0,2})[.,](\d{3})[.,](\d{3})\b/g,
     '$1,$2,$3'
   );
-  normalized = normalized.replace(/(?<![.\d])(\d{1,3})\.(\d{3})(?![.\d])/g, '$1,$2');
+  normalized = normalized.replace(/(?<![.\d])([1-9]\d{0,2})\.(\d{3})(?![.\d])/g, '$1,$2');
 
-  // 3) 한국 증권사 특유의 음수 기호(△, ▲, ▼, ▽, 괄호 음수, 하이픈 뒤 공백)를 '-'로 변환
+  // 3) 한국 증권사 특유의 음수 기호(△, ▲, ▼, ▽, 괄호 음수, 물결표 오인식 ~, 하이픈 뒤 공백)를 '-'로 변환
   normalized = normalized
-    .replace(/[△▲▼▽]\s*(\d)/g, '-$1')
+    .replace(/[△▲▼▽~ㅡ—–]\s*(\d)/g, '-$1')
     .replace(/\(\s*(\d{1,3}(?:,\d{3})+|\d{4,12})\s*\)/g, '-$1')
     .replace(/-\s+(\d)/g, '-$1');
 
@@ -392,6 +392,21 @@ function detectStockFromLine(line: string): { symbol: string; isin: string; name
 }
 
 /**
+ * 두 정수의 자릿수가 같을 때 서로 다른 숫자의 개수(해밍 거리)를 반환
+ * (OCR에서 '8'이 '3'으로, '6'이 '5'로 1글자만 오인식된 경우를 정밀 판별하기 위함)
+ */
+function countDifferentDigits(a: number, b: number): number {
+  const sa = String(Math.abs(Math.round(a)));
+  const sb = String(Math.abs(Math.round(b)));
+  if (sa.length !== sb.length) return 99;
+  let diffs = 0;
+  for (let i = 0; i < sa.length; i++) {
+    if (sa[i] !== sb[i]) diffs++;
+  }
+  return diffs;
+}
+
+/**
  * [스마트 방정식 탐색기]
  * 줄 안의 모든 숫자 조합 중에서 (양도가액 - 취득가액 - 필요경비 = 양도소득금액) 등식이 성립하는 최적의 원화 금액 세트를 찾습니다.
  */
@@ -410,7 +425,7 @@ export function findValidTaxTupleSmart(
 
     const n = Math.min(nums.length, 15);
 
-    // 1) 4개 숫자 조합 탐색: sell - buy - fees = gain (오차 ±1,500원 허용: 원단위 절사 및 OCR 1글자 오차 대응)
+    // 1) 4개 숫자 조합 탐색: sell - buy - fees = gain (오차 ±1,500원 허용 + 1글자 OCR 오인식 자동 복원)
     for (let i = 0; i < n; i++) {
       for (let j = 0; j < n; j++) {
         if (j === i) continue;
@@ -425,35 +440,85 @@ export function findValidTaxTupleSmart(
 
           for (let l = 0; l < n; l++) {
             if (l === i || l === j || l === k) continue;
-            const gain = nums[l];
+            const rawGain = nums[l];
 
-            const diff = Math.abs(sell - buy - fees - gain);
-            if (diff <= 1500) {
-              let orderBonus = 0;
-              if (i < l && j < l) orderBonus += 5000000;
-              if (i < j && j < k && k < l) orderBonus += 15000000;
-              const score = sell + buy + orderBonus - diff * 500;
+            // OCR에서 음수 부호('-')가 탈락하여 손실(-224,616)이 양수(224,616)로 읽힌 경우까지 포함하여 검증
+            const isStandardOrder = i < j && j < k && k < l;
+            const gainCandidates =
+              isStandardOrder && rawGain > 0 ? [rawGain, -rawGain] : [rawGain];
 
-              if (!bestCandidate || score > bestCandidate.score) {
-                // 만약 diff가 10~1000원 사이(예: 키움 OCR에서 제비용 6,860원이 6,360원으로 읽힌 경우)라면
-                // 양도가액, 취득가액, 양도소득금액(gain) 3개는 큰 금액이라 정확하므로 역산된 필요경비(sell - buy - gain)로 자동 보정
-                let finalFees = fees;
-                let finalGain = gain;
-                const impliedFees = sell - buy - gain;
-                if (diff > 5 && impliedFees >= 0 && String(impliedFees).length === String(fees).length) {
-                  finalFees = impliedFees;
-                  finalGain = gain;
-                } else {
-                  finalGain = sell - buy - finalFees;
+            for (const gain of gainCandidates) {
+              const expectedGain = sell - buy - fees;
+              const diff = Math.abs(expectedGain - gain);
+
+              if (diff <= 1500) {
+                let orderBonus = 0;
+                if (i < l && j < l) orderBonus += 5000000;
+                if (isStandardOrder) orderBonus += 15000000;
+                if (gain === rawGain) orderBonus += 2000000;
+                const score = sell + buy + orderBonus - diff * 500;
+
+                if (!bestCandidate || score > bestCandidate.score) {
+                  let finalFees = fees;
+                  let finalGain = gain;
+                  const impliedFees = sell - buy - gain;
+                  if (
+                    diff > 5 &&
+                    impliedFees >= 0 &&
+                    countDifferentDigits(impliedFees, fees) <= 1
+                  ) {
+                    finalFees = impliedFees;
+                    finalGain = gain;
+                  } else {
+                    finalGain = sell - buy - finalFees;
+                  }
+
+                  bestCandidate = {
+                    sellAmount: sell,
+                    buyAmount: buy,
+                    fees: finalFees,
+                    gain: finalGain,
+                    score,
+                  };
                 }
-
-                bestCandidate = {
-                  sellAmount: sell,
-                  buyAmount: buy,
-                  fees: finalFees,
-                  gain: finalGain,
-                  score,
-                };
+              } else if (isStandardOrder && gain !== 0 && Math.max(sell, buy) >= 10000) {
+                // [1글자 OCR 오인식 정밀 복원]
+                // 예: 키움증권 합계 행에서 '9,028,663'의 '8'이 '3'으로('9,023,663', 오차 5,000원) 읽히거나
+                // '6,860'이 '6,360'으로 읽혀 diff가 1,500원을 초과한 경우, 나머지 자릿수(7자리 중 6자리)가 완벽히 일치하면 역산값으로 복원!
+                const feeVariants = [
+                  fees,
+                  parseInt(String(fees).replace(/3/g, '8'), 10),
+                  parseInt(String(fees).replace(/8/g, '3'), 10),
+                ];
+                for (const fCand of feeVariants) {
+                  if (isNaN(fCand) || fCand < 0) continue;
+                  const impliedBuy = sell - fCand - gain;
+                  if (impliedBuy >= 1000 && countDifferentDigits(impliedBuy, buy) <= 1) {
+                    const score = sell + impliedBuy + 12000000;
+                    if (!bestCandidate || score > bestCandidate.score) {
+                      bestCandidate = {
+                        sellAmount: sell,
+                        buyAmount: impliedBuy,
+                        fees: fCand,
+                        gain,
+                        score,
+                      };
+                    }
+                  }
+                  const impliedSell = buy + fCand + gain;
+                  if (impliedSell >= 1000 && countDifferentDigits(impliedSell, sell) <= 1) {
+                    const score = impliedSell + buy + 12000000;
+                    if (!bestCandidate || score > bestCandidate.score) {
+                      bestCandidate = {
+                        sellAmount: impliedSell,
+                        buyAmount: buy,
+                        fees: fCand,
+                        gain,
+                        score,
+                      };
+                    }
+                  }
+                }
               }
             }
           }
@@ -498,29 +563,99 @@ export function findValidTaxTupleSmart(
   // 3) [합계 행 전용 대수적 복원(Algebraic Repair)]
   // 예: KB증권 스캔본에서 '합계' 줄의 [취득가액 4,168,859 / 제비용 1,804 / 손익 157,450] 3개는 정확히 추출되었으나
   // 양도가액(4,328,113)이 '4328.13.'처럼 일부 자릿수가 깨져 소수점으로 필터링된 경우,
-  // (취득가액 + 제비용 + 손익 = 4,328,113)으로 계산한 값의 앞 3자리('432')가 원문 줄에 존재하면 100% 정확하게 복원!
+  // 이미 사용된 숫자들을 원문에서 제거한 나머지 깨진 숫자 조각('432813')에 역산된 양도가액('4328113')의 앞/뒤 자릿수가 존재하는지 검증하여 복원!
+  // (주의: 키움증권처럼 한 줄에 0이 2개 있을 때 buy + 0 + 0 = buy로 자기 자신을 복원하는 오류를 원천 차단)
   if (rawLineForRepair && nums.length >= 3) {
-    const rawDigitsOnly = rawLineForRepair.replace(/[^0-9]/g, '');
     for (let i = 0; i < nums.length; i++) {
       for (let j = 0; j < nums.length; j++) {
         if (j === i) continue;
         for (let k = 0; k < nums.length; k++) {
           if (k === i || k === j) continue;
+
+          // (3-A) 양도가액(sell)이 깨진 경우(예: KB증권 '4328.13.'): reconstructedSell = buy + fees + gain
           const buy = nums[i];
           const fees = nums[j];
           const gain = nums[k];
-          if (buy < 1000 || fees < 0 || fees > buy * 0.2) continue;
-          const reconstructedSell = buy + fees + gain;
-          if (reconstructedSell < 1000) continue;
-          const prefix3 = String(reconstructedSell).slice(0, 3);
-          const suffix2 = String(reconstructedSell).slice(-2);
-          if (rawDigitsOnly.includes(prefix3) && rawDigitsOnly.includes(suffix2)) {
-            return {
-              sellAmount: reconstructedSell,
-              buyAmount: buy,
-              fees,
-              gain,
-            };
+          if (buy >= 1000 && fees >= 0 && fees <= buy * 0.2 && gain !== 0) {
+            let leftoverLine = rawLineForRepair;
+            for (const usedNum of [buy, fees, Math.abs(gain)]) {
+              const formatted = usedNum.toLocaleString('en-US');
+              leftoverLine = leftoverLine.replace(formatted, ' ').replace(String(usedNum), ' ');
+            }
+            const leftoverDigits = leftoverLine.replace(/[^0-9]/g, '');
+
+            const reconstructedSell = buy + fees + gain;
+            if (reconstructedSell >= 1000 && reconstructedSell !== buy) {
+              const prefix3 = String(reconstructedSell).slice(0, 3);
+              const suffix2 = String(reconstructedSell).slice(-2);
+              if (leftoverDigits.includes(prefix3) && leftoverDigits.includes(suffix2)) {
+                return {
+                  sellAmount: reconstructedSell,
+                  buyAmount: buy,
+                  fees,
+                  gain,
+                };
+              }
+            }
+
+            // (3-B) 취득가액(buy)이 깨진 경우(예: 키움증권 '9028.66'): reconstructedBuy = sell - fees - gain
+            for (const gCand of gain > 0 ? [gain, -gain] : [gain]) {
+              const sell = nums[i];
+              const fVariants = [
+                fees,
+                parseInt(String(fees).replace(/3/g, '8'), 10),
+                parseInt(String(fees).replace(/8/g, '3'), 10),
+              ];
+              for (const fCand of fVariants) {
+                if (isNaN(fCand) || fCand < 0) continue;
+                const reconstructedBuy = sell - fCand - gCand;
+                if (reconstructedBuy >= 1000 && reconstructedBuy !== sell) {
+                  const p3 = String(reconstructedBuy).slice(0, 3);
+                  const s2 = String(reconstructedBuy).slice(-2);
+                  if (leftoverDigits.includes(p3) && leftoverDigits.includes(s2)) {
+                    return {
+                      sellAmount: sell,
+                      buyAmount: reconstructedBuy,
+                      fees: fCand,
+                      gain: gCand,
+                    };
+                  }
+                }
+              }
+            }
+          }
+
+          // (3-C) 양도소득금액(gain)이 깨진 경우(예: 키움증권 '-224.61'): reconstructedGain = sell - buy - fees
+          if (i < j && j < k) {
+            const sell = nums[i];
+            const buy2 = nums[j];
+            const fees2 = nums[k];
+            if (
+              sell >= 1000 &&
+              buy2 >= 1000 &&
+              fees2 >= 0 &&
+              fees2 <= Math.max(sell, buy2) * 0.2
+            ) {
+              const reconstructedGain = sell - buy2 - fees2;
+              if (reconstructedGain !== 0) {
+                let lo = rawLineForRepair;
+                for (const u of [sell, buy2, fees2]) {
+                  lo = lo.replace(u.toLocaleString('en-US'), ' ').replace(String(u), ' ');
+                }
+                const loDigits = lo.replace(/[^0-9]/g, '');
+                const absG = String(Math.abs(reconstructedGain));
+                const p2 = absG.slice(0, 2);
+                const s2 = absG.slice(-2);
+                if (loDigits.includes(p2) && loDigits.includes(s2)) {
+                  return {
+                    sellAmount: sell,
+                    buyAmount: buy2,
+                    fees: fees2,
+                    gain: reconstructedGain,
+                  };
+                }
+              }
+            }
           }
         }
       }
