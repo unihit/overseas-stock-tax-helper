@@ -1,14 +1,18 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ShieldCheck,
   Calculator,
   BookOpen,
   ChevronDown,
   ChevronUp,
-  CheckCircle,
-  Columns2,
+  Sparkles,
+  PictureInPicture2,
 } from 'lucide-react';
-import { computeTaxSummary, useTaxStore } from './store/useTaxStore';
+import {
+  computeTaxSummary,
+  requestInitialSyncForPopup,
+  useTaxStore,
+} from './store/useTaxStore';
 import { PdfUploader } from './components/PdfUploader';
 import { BrokerSummaryCards } from './components/BrokerSummaryCards';
 import { TradeTable } from './components/TradeTable';
@@ -18,7 +22,20 @@ import { downloadSampleBrokerPdf, mergeUploadedPdfsForHometax } from './utils/pd
 export const App: React.FC = () => {
   const { taxYear, setTaxYear, trades, uploadedFiles, customRepIsin } = useTaxStore();
   const [showGuide, setShowGuide] = useState(false);
+  const [isCopyModalOpen, setIsCopyModalOpen] = useState(false);
   const [mergeAlert, setMergeAlert] = useState<string | null>(null);
+
+  // URL에 ?popup=1 이 있는 경우 독립 미니 브라우저 팝업창 모드로 렌더링
+  const isStandalonePopup = useMemo(() => {
+    if (typeof window === 'undefined') return false;
+    return new URLSearchParams(window.location.search).get('popup') === '1';
+  }, []);
+
+  useEffect(() => {
+    if (isStandalonePopup) {
+      requestInitialSyncForPopup();
+    }
+  }, [isStandalonePopup]);
 
   const summary = useMemo(
     () => computeTaxSummary(trades, taxYear, customRepIsin),
@@ -35,11 +52,34 @@ export const App: React.FC = () => {
     }
   };
 
+  // 별도의 독립 미니 브라우저 팝업창(리모컨)으로 열기
+  const handleOpenStandaloneWindow = () => {
+    const popupUrl = `${window.location.origin}${window.location.pathname}?popup=1`;
+    window.open(
+      popupUrl,
+      'HometaxCopyHelperWindow',
+      'width=520,height=860,left=120,top=80,resizable=yes,scrollbars=yes'
+    );
+    setIsCopyModalOpen(false);
+  };
+
+  // 독립 미니 팝업창 모드일 때는 HometaxCopyPanel만 전체 화면으로 깔끔하게 표시
+  if (isStandalonePopup) {
+    return (
+      <HometaxCopyPanel
+        summary={summary}
+        trades={trades}
+        onMergePdfClick={handleMergePdfClick}
+        isStandaloneWindow={true}
+      />
+    );
+  }
+
   return (
-    <div className="min-h-screen flex flex-col bg-slate-100 text-slate-900">
+    <div className="min-h-screen flex flex-col bg-slate-100 text-slate-900 pb-20">
       {/* 최상단 100% 브라우저 로컬 처리 보안 안심 배너 */}
-      <div className="bg-emerald-950 text-emerald-100 px-4 sm:px-6 xl:px-10 py-2 text-xs border-b border-emerald-800">
-        <div className="max-w-[1800px] mx-auto flex flex-wrap items-center justify-between gap-2">
+      <div className="bg-emerald-950 text-emerald-100 px-4 sm:px-6 py-2 text-xs border-b border-emerald-800">
+        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 font-medium">
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30">
               <ShieldCheck className="w-3.5 h-3.5" /> 100% 로컬 브라우저 처리
@@ -55,30 +95,25 @@ export const App: React.FC = () => {
       </div>
 
       {/* 상단 네비게이션 & 귀속연도 헤더 */}
-      <header className="bg-white border-b border-slate-200 shadow-2xs">
-        <div className="max-w-[1800px] mx-auto px-4 sm:px-6 xl:px-10 py-4 flex flex-wrap items-center justify-between gap-4">
+      <header className="bg-white border-b border-slate-200 shadow-2xs sticky top-0 z-30">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-sm">
               <Calculator className="w-6 h-6" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-lg sm:text-xl font-extrabold tracking-tight text-slate-900">
-                  해외주식 양도소득세 계산기 & 홈택스 원클릭 복사기
-                </h1>
-                <span className="hidden md:inline-flex items-center gap-1 text-xs font-bold px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
-                  <Columns2 className="w-3.5 h-3.5" /> 와이드 & 화면분할 최적화
-                </span>
-              </div>
+              <h1 className="text-lg sm:text-xl font-extrabold tracking-tight text-slate-900">
+                해외주식 양도소득세 계산기 & 홈택스 원클릭 복사기
+              </h1>
               <p className="text-xs text-slate-500 mt-0.5">
-                여러 증권사 PDF를 합산(손익통산)하고, 홈택스 [합계액 간편신고] 빈칸을 클릭 한 번으로 채우세요
+                여러 증권사 PDF를 합산(손익통산)하고, 홈택스 [합계액 간편신고] 빈칸을 팝업 도우미로 한 번에 채우세요
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-2">
             <div className="flex items-center gap-1.5 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200 text-xs">
-              <span className="text-slate-500 font-semibold">신고 귀속연도:</span>
+              <span className="text-slate-500 font-semibold">귀속연도:</span>
               <select
                 value={taxYear}
                 onChange={(e) => setTaxYear(Number(e.target.value))}
@@ -93,23 +128,42 @@ export const App: React.FC = () => {
             <button
               type="button"
               onClick={() => setShowGuide((v) => !v)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white transition cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 transition cursor-pointer"
             >
-              <BookOpen className="w-3.5 h-3.5 text-yellow-400" />
-              <span>홈택스 3분 신고 가이드</span>
+              <BookOpen className="w-3.5 h-3.5 text-blue-600" />
+              <span>신고 가이드</span>
               {showGuide ? (
                 <ChevronUp className="w-3.5 h-3.5" />
               ) : (
                 <ChevronDown className="w-3.5 h-3.5" />
               )}
             </button>
+
+            <button
+              type="button"
+              onClick={() => setIsCopyModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-extrabold bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-sm transition cursor-pointer"
+            >
+              <Sparkles className="w-4 h-4 text-yellow-300" />
+              <span>홈택스 원클릭 복사 도우미 (팝업)</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleOpenStandaloneWindow}
+              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white transition cursor-pointer"
+              title="홈택스 옆에 띄워둘 수 있는 독립된 작은 브라우저 팝업창으로 엽니다"
+            >
+              <PictureInPicture2 className="w-3.5 h-3.5 text-yellow-400" />
+              <span>미니 창으로 분리</span>
+            </button>
           </div>
         </div>
 
         {/* 접이식 홈택스 셀프신고 4단계 요약 가이드 */}
         {showGuide && (
-          <div className="bg-blue-950 text-blue-100 border-t border-blue-900 px-4 sm:px-6 xl:px-10 py-4">
-            <div className="max-w-[1800px] mx-auto grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
+          <div className="bg-blue-950 text-blue-100 border-t border-blue-900 px-4 sm:px-6 py-4">
+            <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
               <div className="bg-blue-900/50 rounded-xl p-3 border border-blue-800">
                 <div className="font-extrabold text-yellow-300 mb-1">
                   1단계. 홈택스 메뉴 접속
@@ -131,7 +185,7 @@ export const App: React.FC = () => {
                   3단계. 합계액 1:1 복사 붙여넣기
                 </div>
                 <p className="text-blue-200 leading-relaxed">
-                  수백 건을 다 적을 필요 없이 우측 <b>[홈택스 1:1 원클릭 복사 도우미]</b>의 대표종목 ISIN, 일자, 양도가액/취득가액/필요경비 합계, 기본공제 250만원을 순서대로 복사해 붙여넣습니다.
+                  수백 건을 다 적을 필요 없이 <b>[홈택스 원클릭 복사 도우미 팝업]</b>을 열어 대표종목 ISIN, 일자, 양도가액/취득가액/필요경비 합계, 기본공제 250만원을 순서대로 복사해 붙여넣습니다.
                 </p>
               </div>
               <div className="bg-blue-900/50 rounded-xl p-3 border border-blue-800">
@@ -148,7 +202,7 @@ export const App: React.FC = () => {
       </header>
 
       {/* 상단 핵심 KPI 4대 요약 카드 */}
-      <section className="max-w-[1800px] w-full mx-auto px-4 sm:px-6 xl:px-10 pt-5">
+      <section className="max-w-7xl w-full mx-auto px-4 sm:px-6 pt-5">
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-2xs">
             <div className="text-xs font-semibold text-slate-500">
@@ -191,10 +245,16 @@ export const App: React.FC = () => {
             </div>
           </div>
 
-          <div className="bg-gradient-to-br from-slate-900 to-blue-950 text-white rounded-2xl p-4 shadow-md">
+          <div
+            onClick={() => setIsCopyModalOpen(true)}
+            className="bg-gradient-to-br from-slate-900 to-blue-950 hover:from-blue-950 hover:to-indigo-950 text-white rounded-2xl p-4 shadow-md transition cursor-pointer group"
+            title="클릭하여 홈택스 1:1 원클릭 복사 도우미 팝업 열기"
+          >
             <div className="text-xs font-semibold text-blue-200 flex items-center justify-between">
               <span>최종 납부예정 세액 (22%)</span>
-              <CheckCircle className="w-4 h-4 text-emerald-400" />
+              <span className="inline-flex items-center gap-1 text-[11px] bg-yellow-400 text-slate-950 font-extrabold px-2 py-0.5 rounded-full group-hover:scale-105 transition">
+                <Sparkles className="w-3 h-3" /> 복사 도우미 열기
+              </span>
             </div>
             <div className="text-lg sm:text-xl font-extrabold font-mono text-emerald-400 mt-1">
               {summary.totalTaxPayableKRW.toLocaleString('ko-KR')} 원
@@ -208,7 +268,7 @@ export const App: React.FC = () => {
       </section>
 
       {mergeAlert && (
-        <div className="max-w-[1800px] w-full mx-auto px-4 sm:px-6 xl:px-10 mt-3">
+        <div className="max-w-7xl w-full mx-auto px-4 sm:px-6 mt-3">
           <div className="bg-amber-50 border border-amber-300 text-amber-900 rounded-xl px-4 py-3 text-xs font-semibold flex items-center justify-between gap-2">
             <span>{mergeAlert}</span>
             <button
@@ -222,26 +282,49 @@ export const App: React.FC = () => {
         </div>
       )}
 
-      {/* 메인 2열 와이드 분할 작업 영역 (좌측 8/12: 업로드·검증 테이블 / 우측 4/12: 홈택스 1:1 원클릭 복사기) */}
-      <main className="max-w-[1800px] w-full mx-auto px-4 sm:px-6 xl:px-10 py-5 flex-1">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          {/* 좌측 열 (8/12) - 좌우 스크롤 없이 모든 컬럼이 한눈에 펼쳐지도록 확장 */}
-          <div className="lg:col-span-7 xl:col-span-8 space-y-5 min-w-0">
-            <PdfUploader />
-            <BrokerSummaryCards summary={summary} />
-            <TradeTable trades={trades} summary={summary} />
-          </div>
-
-          {/* 우측 열 (4/12) - 홈택스 1:1 원클릭 복사 패널 */}
-          <div className="lg:col-span-5 xl:col-span-4 min-w-0">
-            <HometaxCopyPanel
-              summary={summary}
-              trades={trades}
-              onMergePdfClick={handleMergePdfClick}
-            />
-          </div>
-        </div>
+      {/* 메인 단일 풀폭 작업 영역 (업로드 -> 증권사별 요약 -> 와이드 검증 테이블) */}
+      <main className="max-w-7xl w-full mx-auto px-4 sm:px-6 py-5 flex-1 space-y-5">
+        <PdfUploader />
+        <BrokerSummaryCards summary={summary} />
+        <TradeTable
+          trades={trades}
+          summary={summary}
+          onOpenCopyPopup={() => setIsCopyModalOpen(true)}
+        />
       </main>
+
+      {/* 우측 하단 플로팅 원클릭 복사 도우미 실행 바 */}
+      <div className="fixed bottom-5 right-5 z-40 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setIsCopyModalOpen(true)}
+          className="inline-flex items-center gap-2.5 px-5 py-3.5 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-700 hover:to-indigo-800 text-white font-extrabold text-sm shadow-xl shadow-blue-900/30 border border-white/20 transition transform hover:-translate-y-0.5 cursor-pointer"
+        >
+          <Sparkles className="w-5 h-5 text-yellow-300" />
+          <span>홈택스 1:1 원클릭 복사 도우미 열기</span>
+          <span className="bg-white/20 px-2 py-0.5 rounded-lg text-xs font-mono">
+            세액 {summary.totalTaxPayableKRW.toLocaleString('ko-KR')}원
+          </span>
+        </button>
+      </div>
+
+      {/* 홈택스 1:1 원클릭 복사 도우미 모달 팝업 */}
+      {isCopyModalOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsCopyModalOpen(false);
+          }}
+        >
+          <HometaxCopyPanel
+            summary={summary}
+            trades={trades}
+            onMergePdfClick={handleMergePdfClick}
+            onClose={() => setIsCopyModalOpen(false)}
+            onOpenStandalonePopup={handleOpenStandaloneWindow}
+          />
+        </div>
+      )}
 
       {/* 푸터 */}
       <footer className="bg-white border-t border-slate-200 py-4 px-4 text-center text-xs text-slate-400">

@@ -102,7 +102,29 @@ export const INITIAL_SAMPLE_TRADES: TradeRecord[] = [
   },
 ];
 
-export const useTaxStore = create<TaxState>((set) => ({
+// 같은 브라우저 내 메인 창 <-> 독립 미니 팝업창 간 실시간 메모리 동기화 채널 (외부 전송 X)
+const syncChannel =
+  typeof window !== 'undefined' && 'BroadcastChannel' in window
+    ? new BroadcastChannel('overseas_stock_tax_popup_sync')
+    : null;
+
+function broadcastState(state: Partial<TaxState>) {
+  try {
+    syncChannel?.postMessage({
+      type: 'SYNC_STATE',
+      payload: {
+        taxYear: state.taxYear,
+        trades: state.trades,
+        stripCommasOnCopy: state.stripCommasOnCopy,
+        customRepIsin: state.customRepIsin,
+      },
+    });
+  } catch {
+    // ignore
+  }
+}
+
+export const useTaxStore = create<TaxState>((set, get) => ({
   taxYear: 2025,
   trades: INITIAL_SAMPLE_TRADES,
   uploadedFiles: [
@@ -145,16 +167,23 @@ export const useTaxStore = create<TaxState>((set) => ({
   activeCopyStepIndex: 0,
   lastCopiedFieldId: null,
 
-  setTaxYear: (year) => set({ taxYear: year }),
-  setStripCommasOnCopy: (strip) => set({ stripCommasOnCopy: strip }),
-  setCustomRepIsin: (isin) => set({ customRepIsin: isin }),
+  setTaxYear: (year) => {
+    set({ taxYear: year });
+    broadcastState(get());
+  },
+  setStripCommasOnCopy: (strip) => {
+    set({ stripCommasOnCopy: strip });
+    broadcastState(get());
+  },
+  setCustomRepIsin: (isin) => {
+    set({ customRepIsin: isin });
+    broadcastState(get());
+  },
   setActiveCopyStepIndex: (index) => set({ activeCopyStepIndex: index }),
   setLastCopiedFieldId: (id) => set({ lastCopiedFieldId: id }),
 
-  addTrades: (newTrades) =>
+  addTrades: (newTrades) => {
     set((state) => {
-      // 만약 현재 샘플 데이터만 있는 상태에서 실제 PDF를 업로드하면 샘플 데이터를 자동 교체할지,
-      // 혹은 샘플 여부에 따라 자연스럽게 병합할지 처리: 샘플 파일만 있을 때 실제 PDF가 들어오면 샘플 제거 후 추가
       const hasOnlySamples =
         state.trades.length > 0 && state.trades.every((t) => t.parseMethod === 'sample');
       const baseTrades = hasOnlySamples ? [] : state.trades;
@@ -166,20 +195,20 @@ export const useTaxStore = create<TaxState>((set) => ({
         trades: [...baseTrades, ...newTrades],
         uploadedFiles: baseFiles,
       };
-    }),
+    });
+    broadcastState(get());
+  },
 
-  updateTrade: (id, patch) =>
+  updateTrade: (id, patch) => {
     set((state) => ({
       trades: state.trades.map((tr) => {
         if (tr.id !== id) return tr;
         const updated = { ...tr, ...patch };
-        // 티커가 변경되면 ISIN 자동 추천 업데이트 (사용자가 직접 ISIN을 바꾼 경우가 아닐 때)
         if (patch.symbol && !patch.isin) {
           const info = lookupStockInfo(patch.symbol);
           updated.isin = info.isin;
           if (!patch.assetName) updated.assetName = info.name;
         }
-        // 양도가액, 취득가액, 필요경비 변경 시 양도소득금액 자동 재계산
         if (
           patch.sellAmountKRW !== undefined ||
           patch.buyAmountKRW !== undefined ||
@@ -193,14 +222,18 @@ export const useTaxStore = create<TaxState>((set) => ({
         }
         return updated;
       }),
-    })),
+    }));
+    broadcastState(get());
+  },
 
-  deleteTrade: (id) =>
+  deleteTrade: (id) => {
     set((state) => ({
       trades: state.trades.filter((tr) => tr.id !== id),
-    })),
+    }));
+    broadcastState(get());
+  },
 
-  addEmptyTrade: (broker = '직접입력/기타') =>
+  addEmptyTrade: (broker = '직접입력/기타') => {
     set((state) => ({
       trades: [
         ...state.trades,
@@ -220,17 +253,21 @@ export const useTaxStore = create<TaxState>((set) => ({
           parseMethod: 'manual',
         },
       ],
-    })),
+    }));
+    broadcastState(get());
+  },
 
-  clearAll: () =>
+  clearAll: () => {
     set({
       trades: [],
       uploadedFiles: [],
       customRepIsin: null,
       activeCopyStepIndex: 0,
-    }),
+    });
+    broadcastState(get());
+  },
 
-  loadSampleMultiBrokerData: () =>
+  loadSampleMultiBrokerData: () => {
     set({
       trades: INITIAL_SAMPLE_TRADES,
       uploadedFiles: [
@@ -270,7 +307,9 @@ export const useTaxStore = create<TaxState>((set) => ({
       ],
       customRepIsin: null,
       activeCopyStepIndex: 0,
-    }),
+    });
+    broadcastState(get());
+  },
 
   addOrUpdateFile: (file) =>
     set((state) => {
@@ -283,12 +322,34 @@ export const useTaxStore = create<TaxState>((set) => ({
       };
     }),
 
-  removeFile: (fileId, fileName) =>
+  removeFile: (fileId, fileName) => {
     set((state) => ({
       uploadedFiles: state.uploadedFiles.filter((f) => f.id !== fileId),
       trades: state.trades.filter((t) => t.sourceFileName !== fileName),
-    })),
+    }));
+    broadcastState(get());
+  },
 }));
+
+// 팝업창이 열릴 때 메인 창의 최신 상태를 요청하거나 수신
+if (syncChannel) {
+  syncChannel.onmessage = (ev) => {
+    if (ev.data?.type === 'SYNC_STATE' && ev.data.payload) {
+      useTaxStore.setState({
+        taxYear: ev.data.payload.taxYear,
+        trades: ev.data.payload.trades,
+        stripCommasOnCopy: ev.data.payload.stripCommasOnCopy,
+        customRepIsin: ev.data.payload.customRepIsin,
+      });
+    } else if (ev.data?.type === 'REQUEST_STATE') {
+      broadcastState(useTaxStore.getState());
+    }
+  };
+}
+
+export function requestInitialSyncForPopup() {
+  syncChannel?.postMessage({ type: 'REQUEST_STATE' });
+}
 
 export function computeTaxSummary(
   trades: TradeRecord[],
@@ -334,13 +395,11 @@ export function computeTaxSummary(
 
   const netCapitalGainKRW = totalSellAmountKRW - totalBuyAmountKRW - totalFeesKRW;
 
-  // 연간 기본공제 250만원 (양도소득금액이 양수일 때 최대 2,500,000원 공제)
   const basicDeductionKRW =
     netCapitalGainKRW > 0 ? Math.min(2500000, netCapitalGainKRW) : 2500000;
 
   const taxableBaseKRW = Math.max(0, netCapitalGainKRW - 2500000);
 
-  // 국세기본법상 10원 미만 절사 (원단위 절사)
   const capitalGainsTaxKRW = Math.floor((taxableBaseKRW * 0.2) / 10) * 10;
   const localIncomeTaxKRW = Math.floor((taxableBaseKRW * 0.02) / 10) * 10;
   const totalTaxPayableKRW = capitalGainsTaxKRW + localIncomeTaxKRW;

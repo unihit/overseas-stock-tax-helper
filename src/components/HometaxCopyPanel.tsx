@@ -9,7 +9,8 @@ import {
   FileCheck2,
   RotateCcw,
   ExternalLink,
-  HelpCircle,
+  X,
+  PictureInPicture2,
 } from 'lucide-react';
 import { TaxSummary, TradeRecord } from '../types/tax';
 import { useTaxStore } from '../store/useTaxStore';
@@ -18,6 +19,9 @@ interface HometaxCopyPanelProps {
   summary: TaxSummary;
   trades: TradeRecord[];
   onMergePdfClick: () => void;
+  onClose?: () => void;
+  onOpenStandalonePopup?: () => void;
+  isStandaloneWindow?: boolean;
 }
 
 interface CopyItemSpec {
@@ -38,6 +42,9 @@ export const HometaxCopyPanel: React.FC<HometaxCopyPanelProps> = ({
   summary,
   trades,
   onMergePdfClick,
+  onClose,
+  onOpenStandalonePopup,
+  isStandaloneWindow = false,
 }) => {
   const {
     stripCommasOnCopy,
@@ -144,7 +151,6 @@ export const HometaxCopyPanel: React.FC<HometaxCopyPanelProps> = ({
       }
       setToastMsg(`[${label}] "${valueToCopy}" 복사 완료! 홈택스 빈칸에 Ctrl+V 하세요.`);
     } catch {
-      // Fallback copy
       const textarea = document.createElement('textarea');
       textarea.value = valueToCopy;
       document.body.appendChild(textarea);
@@ -156,16 +162,19 @@ export const HometaxCopyPanel: React.FC<HometaxCopyPanelProps> = ({
     }
   };
 
-  // 토스트 타이머
   useEffect(() => {
     if (!toastMsg) return;
     const timer = setTimeout(() => setToastMsg(null), 3200);
     return () => clearTimeout(timer);
   }, [toastMsg]);
 
-  // 단축키 Alt+C 로 순서대로 다음 빈칸 복사 지원
+  // 단축키 Alt+C 로 순서대로 다음 빈칸 복사 지원, ESC로 모달 닫기
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && onClose && !isStandaloneWindow) {
+        onClose();
+        return;
+      }
       if (e.altKey && (e.key === 'c' || e.key === 'C' || e.key === 'ㅊ')) {
         e.preventDefault();
         const currentStep = copySteps[activeCopyStepIndex] || copySteps[0];
@@ -185,41 +194,70 @@ export const HometaxCopyPanel: React.FC<HometaxCopyPanelProps> = ({
     setActiveCopyStepIndex(nextIdx);
   };
 
-  // 중복 없는 종목 목록 (대표종목 변경 드롭다운용)
   const uniqueStocks = Array.from(
     new Map(trades.map((t) => [t.isin, { symbol: t.symbol, isin: t.isin, name: t.assetName }])).values()
   );
 
   return (
-    <div className="bg-white rounded-2xl border-2 border-blue-600/90 shadow-xl overflow-hidden sticky top-4">
+    <div
+      className={`bg-white flex flex-col overflow-hidden ${
+        isStandaloneWindow
+          ? 'min-h-screen w-full'
+          : 'rounded-2xl border-2 border-blue-600/90 shadow-2xl w-full max-w-xl max-h-[90vh]'
+      }`}
+    >
       {/* 패널 상단 헤더 */}
-      <div className="bg-gradient-to-r from-blue-700 via-blue-600 to-indigo-700 px-5 py-4 text-white">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
+      <div className="bg-gradient-to-r from-blue-700 via-blue-600 to-indigo-700 px-5 py-4 text-white shrink-0">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-2.5">
             <span className="bg-white/20 p-1.5 rounded-lg">
               <Sparkles className="w-5 h-5 text-yellow-300" />
             </span>
             <div>
-              <h2 className="text-base font-bold tracking-tight flex items-center gap-2">
-                홈택스 1:1 원클릭 복사 도우미
+              <h2 className="text-base font-bold tracking-tight flex flex-wrap items-center gap-2">
+                <span>홈택스 1:1 원클릭 복사 도우미</span>
                 <span className="text-[11px] bg-yellow-400 text-slate-950 font-extrabold px-2 py-0.5 rounded-full">
                   합계액 간편신고 규격
                 </span>
               </h2>
               <p className="text-xs text-blue-100 mt-0.5">
-                우측에 홈택스를 띄워두고 위에서 아래 순서대로 <b>[복사]</b> → <b>[Ctrl+V]</b> 하세요
+                홈택스 창 옆에 띄워두고 1번부터 7번까지 순서대로 <b>[복사]</b> → <b>[Ctrl+V]</b> 하세요
               </p>
             </div>
           </div>
-          <a
-            href="https://www.hometax.go.kr"
-            target="_blank"
-            rel="noreferrer"
-            className="shrink-0 inline-flex items-center gap-1 text-xs bg-white/15 hover:bg-white/25 text-white px-2.5 py-1.5 rounded-lg font-medium transition cursor-pointer"
-            title="국세청 홈택스 새창 열기"
-          >
-            홈택스 열기 <ExternalLink className="w-3.5 h-3.5" />
-          </a>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            {!isStandaloneWindow && onOpenStandalonePopup && (
+              <button
+                type="button"
+                onClick={onOpenStandalonePopup}
+                className="inline-flex items-center gap-1 text-xs bg-white/15 hover:bg-white/25 text-white px-2.5 py-1.5 rounded-lg font-semibold transition cursor-pointer"
+                title="홈택스 화면 옆에 별도의 작은 리모컨 창으로 분리해서 띄웁니다"
+              >
+                <PictureInPicture2 className="w-3.5 h-3.5" />
+                <span>미니 팝업창 분리</span>
+              </button>
+            )}
+            <a
+              href="https://www.hometax.go.kr"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-xs bg-white/15 hover:bg-white/25 text-white px-2.5 py-1.5 rounded-lg font-medium transition cursor-pointer"
+              title="국세청 홈택스 새창 열기"
+            >
+              홈택스 <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+            {!isStandaloneWindow && onClose && (
+              <button
+                type="button"
+                onClick={onClose}
+                className="p-1.5 rounded-lg bg-white/10 hover:bg-white/25 text-white transition cursor-pointer"
+                title="팝업 닫기 (ESC)"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
         </div>
 
         {/* 순차 복사 액션 바 */}
@@ -231,7 +269,7 @@ export const HometaxCopyPanel: React.FC<HometaxCopyPanelProps> = ({
           >
             <span>
               순서대로 다음 빈칸 복사 ({activeCopyStepIndex + 1}/{copySteps.length}번:{' '}
-              {copySteps[activeCopyStepIndex]?.label.split(' ')[0]})
+              {copySteps[activeCopyStepIndex]?.label.split(' ')[0]}) · 단축키 Alt+C
             </span>
             <ArrowRight className="w-4 h-4" />
           </button>
@@ -248,14 +286,14 @@ export const HometaxCopyPanel: React.FC<HometaxCopyPanelProps> = ({
 
       {/* 실시간 복사 완료 토스트 배너 */}
       {toastMsg && (
-        <div className="bg-emerald-600 text-white px-4 py-2.5 text-xs font-semibold flex items-center gap-2 animate-fade-in">
+        <div className="bg-emerald-600 text-white px-4 py-2.5 text-xs font-semibold flex items-center gap-2 shrink-0">
           <Check className="w-4 h-4 shrink-0" />
           <span className="truncate">{toastMsg}</span>
         </div>
       )}
 
       {/* 복사 포맷 옵션 바 */}
-      <div className="bg-slate-100 px-5 py-2.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-700">
+      <div className="bg-slate-100 px-5 py-2.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-700 shrink-0">
         <label className="inline-flex items-center gap-1.5 cursor-pointer select-none font-medium">
           <input
             type="checkbox"
@@ -276,11 +314,11 @@ export const HometaxCopyPanel: React.FC<HometaxCopyPanelProps> = ({
             onChange={(e) => setStripDateHyphen(e.target.checked)}
             className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
           />
-          <span>날짜 하이픈(-) 제외 (예: { summary.taxYear }0101)</span>
+          <span>날짜 하이픈(-) 제외 (예: {summary.taxYear}0101)</span>
         </label>
       </div>
 
-      <div className="p-4 space-y-4 max-h-[calc(100vh-14rem)] overflow-y-auto">
+      <div className="p-4 sm:p-5 space-y-4 overflow-y-auto flex-1">
         {/* STEP 0: 기본정보 선택 가이드 */}
         <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
           <div className="text-xs font-bold text-slate-700 flex items-center justify-between mb-2">
@@ -327,7 +365,7 @@ export const HometaxCopyPanel: React.FC<HometaxCopyPanelProps> = ({
 
           {copySteps
             .filter((s) => s.section === 'step1')
-            .map((item, idx) => {
+            .map((item) => {
               const globalIdx = copySteps.findIndex((c) => c.id === item.id);
               const isCopied = lastCopiedFieldId === item.id;
               const isCurrentStep = activeCopyStepIndex === globalIdx;
