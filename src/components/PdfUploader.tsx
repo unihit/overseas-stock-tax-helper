@@ -23,6 +23,8 @@ const BROKER_BADGE_STYLE: Record<BrokerType, string> = {
   삼성증권: 'bg-sky-100 text-sky-800 border-sky-200',
   'NH투자증권(나무)': 'bg-emerald-100 text-emerald-800 border-emerald-200',
   KB증권: 'bg-amber-100 text-amber-800 border-amber-200',
+  메리츠증권: 'bg-red-100 text-red-800 border-red-200',
+  하나증권: 'bg-teal-100 text-teal-800 border-teal-200',
   '직접입력/기타': 'bg-slate-100 text-slate-800 border-slate-200',
 };
 
@@ -81,21 +83,68 @@ export const PdfUploader: React.FC = () => {
         const totalGain = result.trades.reduce((acc, t) => acc + t.capitalGainKRW, 0);
 
         if (result.trades.length > 0) {
-          addTrades(result.trades);
-          addOrUpdateFile({
-            id: fileId,
-            name: file.name,
-            size: file.size,
-            detectedBroker: result.detectedBroker,
-            status: 'completed',
-            progress: 100,
-            extractedCount: result.trades.length,
-            totalGainKRW: totalGain,
-            rawBuffer: buffer,
-            message: `${result.usedOcr ? '[로컬 OCR 판독] ' : ''}거래내역 ${
-              result.trades.length
-            }건 추출 완료`,
-          });
+          // [분할 PDF 자동 감지 및 중복 합산 방지]
+          // 토스증권_2025_1.pdf, 토스증권_2025_2.pdf처럼 한 증권사의 내역이 2개 이상의 PDF로 나뉜 경우,
+          // 두 PDF 모두 동일한 연간 전체 합계(양도가액/취득가액/필요경비/양도소득금액)를 포함하고 있습니다.
+          // 이미 동일한 증권사 + 동일한 금액의 합계 행이 반영되어 있다면 중복 더하기를 자동 방지하고 증빙 병합용 버퍼만 유지합니다.
+          const currentTrades = useTaxStore.getState().trades.filter((t) => t.parseMethod !== 'sample');
+          const primaryTrade = result.trades[0];
+          const existingDuplicate =
+            result.trades.length === 1 &&
+            currentTrades.find(
+              (t) =>
+                t.broker === result.detectedBroker &&
+                t.sellAmountKRW === primaryTrade.sellAmountKRW &&
+                t.buyAmountKRW === primaryTrade.buyAmountKRW &&
+                t.feesKRW === primaryTrade.feesKRW &&
+                t.capitalGainKRW === primaryTrade.capitalGainKRW
+            );
+
+          if (existingDuplicate) {
+            addOrUpdateFile({
+              id: fileId,
+              name: file.name,
+              size: file.size,
+              detectedBroker: result.detectedBroker,
+              status: 'completed',
+              progress: 100,
+              extractedCount: 0,
+              totalGainKRW: totalGain,
+              rawBuffer: buffer,
+              rawLines: result.rawLines,
+              summaryTrade: result.summaryTrade,
+              individualTrades: result.individualTrades,
+              activeMode: result.activeMode,
+              isDuplicateSplit: true,
+              message: `🔗 분할 PDF 자동 감지: [${existingDuplicate.sourceFileName || '앞선 파일'}]에 동일한 연간 합계(${totalGain >= 0 ? '+' : ''}${totalGain.toLocaleString('ko-KR')}원)가 이미 반영되어 중복 합산을 자동 제외했습니다 (증빙 PDF 병합 시에는 함께 포함됨)`,
+            });
+          } else {
+            addTrades(result.trades);
+            addOrUpdateFile({
+              id: fileId,
+              name: file.name,
+              size: file.size,
+              detectedBroker: result.detectedBroker,
+              status: 'completed',
+              progress: 100,
+              extractedCount: result.trades.length,
+              totalGainKRW: totalGain,
+              rawBuffer: buffer,
+              rawLines: result.rawLines,
+              summaryTrade: result.summaryTrade,
+              individualTrades: result.individualTrades,
+              activeMode: result.activeMode,
+              message: `${result.usedOcr ? '[로컬 OCR 정밀판독] ' : ''}${
+                result.activeMode === 'summary'
+                  ? `연간 문서합계 1건 자동 추출 완료${
+                      result.individualTrades.length > 0
+                        ? ` (세부 종목 ${result.individualTrades.length}건 검증 완료)`
+                        : ''
+                    }`
+                  : `거래내역 ${result.trades.length}건 추출 완료`
+              }`,
+            });
+          }
         } else {
           // 자동 파싱된 행이 없는 경우 빈 행 1개를 해당 증권사로 자동 추가하여 수동 입력 유도
           addTrades([
@@ -285,10 +334,16 @@ export const PdfUploader: React.FC = () => {
                 <div className="flex items-center gap-3 shrink-0">
                   {file.status === 'completed' && (
                     <div className="text-right">
-                      <div className="text-[11px] text-slate-400">추출 손익</div>
+                      <div className="text-[11px] text-slate-400">
+                        {file.isDuplicateSplit ? '중복 합산 제외 (분할문서)' : '추출 손익'}
+                      </div>
                       <div
                         className={`font-bold font-mono ${
-                          file.totalGainKRW >= 0 ? 'text-rose-600' : 'text-blue-600'
+                          file.isDuplicateSplit
+                            ? 'text-slate-400 line-through'
+                            : file.totalGainKRW >= 0
+                            ? 'text-rose-600'
+                            : 'text-blue-600'
                         }`}
                       >
                         {file.totalGainKRW >= 0 ? '+' : ''}

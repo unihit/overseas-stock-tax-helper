@@ -25,6 +25,8 @@ const BROKER_OPTIONS: BrokerType[] = [
   '삼성증권',
   'NH투자증권(나무)',
   'KB증권',
+  '메리츠증권',
+  '하나증권',
   '직접입력/기타',
 ];
 
