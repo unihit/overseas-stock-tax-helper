@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/components/brokersummarycards.tsx","./src/components/hometaxcopypanel.tsx","./src/components/pdfuploader.tsx","./src/components/tradetable.tsx","./src/store/usetaxstore.ts","./src/types/tax.ts","./src/utils/pdfparser.ts","./src/utils/pdftools.ts"],"version":"5.7.3"}

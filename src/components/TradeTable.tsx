@@ -1,0 +1,256 @@
+import React from 'react';
+import {
+  Plus,
+  Trash2,
+  FileSpreadsheet,
+  Table2,
+  AlertCircle,
+} from 'lucide-react';
+import { BrokerType, TaxSummary, TradeRecord } from '../types/tax';
+import { useTaxStore } from '../store/useTaxStore';
+import { exportTaxSummaryToExcel } from '../utils/pdfTools';
+
+interface TradeTableProps {
+  trades: TradeRecord[];
+  summary: TaxSummary;
+}
+
+const BROKER_OPTIONS: BrokerType[] = [
+  '키움증권',
+  '토스증권',
+  '미래에셋증권',
+  '한국투자증권',
+  '삼성증권',
+  'NH투자증권(나무)',
+  'KB증권',
+  '직접입력/기타',
+];
+
+export const TradeTable: React.FC<TradeTableProps> = ({ trades, summary }) => {
+  const { updateTrade, deleteTrade, addEmptyTrade } = useTaxStore();
+
+  const parseNumberInput = (val: string): number => {
+    const cleaned = val.replace(/[^0-9-]/g, '');
+    const parsed = parseInt(cleaned, 10);
+    return isNaN(parsed) ? 0 : parsed;
+  };
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+      {/* 상단 툴바 */}
+      <div className="p-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+            <Table2 className="w-5 h-5 text-blue-600" />
+            <span>2. 추출 내역 검증 및 인라인 수정 (실시간 반영)</span>
+          </h2>
+          <p className="text-xs text-slate-500 mt-0.5">
+            오인식된 숫자가 있거나 증권사 합계만 바로 입력하려면 표의 숫자를 직접 클릭해 수정하세요. 우측 복사 패널에 즉시 반영됩니다.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => addEmptyTrade('직접입력/기타')}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white transition cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>증권사/종목 행 추가</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => exportTaxSummaryToExcel(trades, summary)}
+            disabled={trades.length === 0}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white transition cursor-pointer"
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            <span>엑셀 계산서 다운로드</span>
+          </button>
+        </div>
+      </div>
+
+      {/* 데이터 그리드 테이블 */}
+      <div className="overflow-x-auto">
+        <table className="w-full text-left border-collapse text-xs">
+          <thead>
+            <tr className="bg-slate-100/90 border-b border-slate-200 text-slate-600 font-bold">
+              <th className="py-2.5 px-3">증권사</th>
+              <th className="py-2.5 px-2.5">티커 / ISIN(자동)</th>
+              <th className="py-2.5 px-2.5 text-right">양도가액 (원)</th>
+              <th className="py-2.5 px-2.5 text-right">취득가액 (원)</th>
+              <th className="py-2.5 px-2.5 text-right">필요경비 (원)</th>
+              <th className="py-2.5 px-3 text-right">양도소득금액 (차익)</th>
+              <th className="py-2.5 px-2 text-center w-10">삭제</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-200">
+            {trades.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="py-10 text-center text-slate-400">
+                  업로드된 거래 내역이 없습니다. 상단에 증권사 PDF를 드래그하거나 [+ 증권사/종목 행 추가]를 눌러주세요.
+                </td>
+              </tr>
+            ) : (
+              trades.map((tr) => {
+                const isGain = tr.capitalGainKRW >= 0;
+                return (
+                  <tr
+                    key={tr.id}
+                    className={`hover:bg-blue-50/30 transition ${
+                      tr.hasWarning ? 'bg-amber-50/60' : ''
+                    }`}
+                  >
+                    {/* 증권사 선택 */}
+                    <td className="py-2 px-3 align-middle">
+                      <select
+                        value={tr.broker}
+                        onChange={(e) =>
+                          updateTrade(tr.id, { broker: e.target.value as BrokerType })
+                        }
+                        className="w-32 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-800 focus:border-blue-500 focus:outline-none"
+                      >
+                        {BROKER_OPTIONS.map((opt) => (
+                          <option key={opt} value={opt}>
+                            {opt}
+                          </option>
+                        ))}
+                      </select>
+                      {tr.hasWarning && (
+                        <div className="flex items-center gap-1 text-[10px] text-amber-700 font-semibold mt-0.5">
+                          <AlertCircle className="w-3 h-3" /> 금액 직접 입력 요망
+                        </div>
+                      )}
+                    </td>
+
+                    {/* 티커 및 ISIN */}
+                    <td className="py-2 px-2.5 align-middle">
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="text"
+                          value={tr.symbol}
+                          onChange={(e) =>
+                            updateTrade(tr.id, { symbol: e.target.value.toUpperCase() })
+                          }
+                          placeholder="티커 (예: NVDA)"
+                          className="w-16 rounded border border-slate-200 px-1.5 py-1 text-xs font-bold text-slate-900 uppercase focus:border-blue-500 focus:outline-none"
+                        />
+                        <input
+                          type="text"
+                          value={tr.isin}
+                          onChange={(e) =>
+                            updateTrade(tr.id, { isin: e.target.value.toUpperCase() })
+                          }
+                          placeholder="ISIN 12자리"
+                          className="w-28 rounded border border-slate-200 bg-slate-50 px-1.5 py-1 text-[11px] font-mono text-slate-600 uppercase focus:border-blue-500 focus:outline-none"
+                        />
+                      </div>
+                      <div className="text-[11px] text-slate-400 truncate max-w-[180px] mt-0.5">
+                        {tr.assetName}
+                      </div>
+                    </td>
+
+                    {/* 양도가액 (원) */}
+                    <td className="py-2 px-2.5 align-middle text-right">
+                      <input
+                        type="text"
+                        value={tr.sellAmountKRW.toLocaleString('ko-KR')}
+                        onChange={(e) =>
+                          updateTrade(tr.id, {
+                            sellAmountKRW: parseNumberInput(e.target.value),
+                          })
+                        }
+                        className="w-28 text-right rounded-lg border border-slate-200 px-2 py-1 font-mono font-semibold text-slate-900 focus:border-blue-500 focus:outline-none"
+                      />
+                    </td>
+
+                    {/* 취득가액 (원) */}
+                    <td className="py-2 px-2.5 align-middle text-right">
+                      <input
+                        type="text"
+                        value={tr.buyAmountKRW.toLocaleString('ko-KR')}
+                        onChange={(e) =>
+                          updateTrade(tr.id, {
+                            buyAmountKRW: parseNumberInput(e.target.value),
+                          })
+                        }
+                        className="w-28 text-right rounded-lg border border-slate-200 px-2 py-1 font-mono font-semibold text-slate-900 focus:border-blue-500 focus:outline-none"
+                      />
+                    </td>
+
+                    {/* 필요경비 (원) */}
+                    <td className="py-2 px-2.5 align-middle text-right">
+                      <input
+                        type="text"
+                        value={tr.feesKRW.toLocaleString('ko-KR')}
+                        onChange={(e) =>
+                          updateTrade(tr.id, {
+                            feesKRW: parseNumberInput(e.target.value),
+                          })
+                        }
+                        className="w-24 text-right rounded-lg border border-slate-200 px-2 py-1 font-mono font-semibold text-slate-700 focus:border-blue-500 focus:outline-none"
+                      />
+                    </td>
+
+                    {/* 양도소득금액 (자동계산) */}
+                    <td className="py-2 px-3 align-middle text-right">
+                      <span
+                        className={`font-mono font-extrabold text-xs ${
+                          isGain ? 'text-rose-600' : 'text-blue-600'
+                        }`}
+                      >
+                        {isGain ? '+' : ''}
+                        {tr.capitalGainKRW.toLocaleString('ko-KR')}
+                      </span>
+                    </td>
+
+                    {/* 삭제 */}
+                    <td className="py-2 px-2 align-middle text-center">
+                      <button
+                        type="button"
+                        onClick={() => deleteTrade(tr.id)}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
+                        title="행 삭제"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+
+          {/* 하단 전체 합계 푸터 */}
+          {trades.length > 0 && (
+            <tfoot>
+              <tr className="bg-slate-900 text-white font-bold text-xs">
+                <td colSpan={2} className="py-3 px-3">
+                  전체 증권사 합산 ({trades.length}건 통산)
+                </td>
+                <td className="py-3 px-2.5 text-right font-mono">
+                  {summary.totalSellAmountKRW.toLocaleString('ko-KR')}
+                </td>
+                <td className="py-3 px-2.5 text-right font-mono">
+                  {summary.totalBuyAmountKRW.toLocaleString('ko-KR')}
+                </td>
+                <td className="py-3 px-2.5 text-right font-mono">
+                  {summary.totalFeesKRW.toLocaleString('ko-KR')}
+                </td>
+                <td
+                  className={`py-3 px-3 text-right font-mono text-sm ${
+                    summary.netCapitalGainKRW >= 0 ? 'text-amber-300' : 'text-sky-300'
+                  }`}
+                >
+                  {summary.netCapitalGainKRW >= 0 ? '+' : ''}
+                  {summary.netCapitalGainKRW.toLocaleString('ko-KR')}원
+                </td>
+                <td />
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+    </div>
+  );
+};

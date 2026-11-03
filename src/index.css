@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, 'Helvetica Neue', 'Segoe UI', 'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', sans-serif;
+  }
+}
+
+/* Custom subtle pulse for active step in HomeTax Copy Helper */
+@keyframes pulse-border {
+  0%, 100% {
+    border-color: rgb(59 130 246 / 0.8);
+  }
+  50% {
+    border-color: rgb(147 197 253 / 0.4);
+  }
+}
+
+.active-copy-step {
+  animation: pulse-border 2s infinite;
+}
