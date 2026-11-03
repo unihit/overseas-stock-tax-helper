@@ -28,7 +28,6 @@ export const App: React.FC = () => {
   const handleMergePdfClick = async () => {
     const ok = await mergeUploadedPdfsForHometax(uploadedFiles, taxYear);
     if (!ok) {
-      // 실제 업로드된 PDF가 아직 없고 예시 데이터만 있는 경우 테스트용 PDF 생성 안내
       setMergeAlert(
         '현재 예시 데이터가 로드되어 있습니다. 직접 업로드하신 증권사 PDF가 1개 이상 있을 때 하나의 합본 PDF로 병합 다운로드됩니다. (테스트용 키움 PDF를 먼저 내려받아 드래그해 보세요!)'
       );
@@ -39,8 +38,8 @@ export const App: React.FC = () => {
   return (
     <div className="min-h-screen flex flex-col bg-slate-100 text-slate-900">
       {/* 최상단 100% 브라우저 로컬 처리 보안 안심 배너 */}
-      <div className="bg-emerald-950 text-emerald-100 px-4 py-2 text-xs border-b border-emerald-800">
-        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
+      <div className="bg-emerald-950 text-emerald-100 px-4 sm:px-6 xl:px-10 py-2 text-xs border-b border-emerald-800">
+        <div className="max-w-[1800px] mx-auto flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 font-medium">
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30">
               <ShieldCheck className="w-3.5 h-3.5" /> 100% 로컬 브라우저 처리
@@ -57,7 +56,7 @@ export const App: React.FC = () => {
 
       {/* 상단 네비게이션 & 귀속연도 헤더 */}
       <header className="bg-white border-b border-slate-200 shadow-2xs">
-        <div className="max-w-7xl mx-auto px-4 py-4 flex flex-wrap items-center justify-between gap-4">
+        <div className="max-w-[1800px] mx-auto px-4 sm:px-6 xl:px-10 py-4 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-sm">
               <Calculator className="w-6 h-6" />
@@ -68,7 +67,7 @@ export const App: React.FC = () => {
                   해외주식 양도소득세 계산기 & 홈택스 원클릭 복사기
                 </h1>
                 <span className="hidden md:inline-flex items-center gap-1 text-xs font-bold px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
-                  <Columns2 className="w-3.5 h-3.5" /> 화면분할 최적화
+                  <Columns2 className="w-3.5 h-3.5" /> 와이드 & 화면분할 최적화
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
@@ -107,10 +106,10 @@ export const App: React.FC = () => {
           </div>
         </div>
 
-        {/* 접이식 홈택스 셀프신고 7단계 요약 가이드 */}
+        {/* 접이식 홈택스 셀프신고 4단계 요약 가이드 */}
         {showGuide && (
-          <div className="bg-blue-950 text-blue-100 border-t border-blue-900 px-4 py-4">
-            <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
+          <div className="bg-blue-950 text-blue-100 border-t border-blue-900 px-4 sm:px-6 xl:px-10 py-4">
+            <div className="max-w-[1800px] mx-auto grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
               <div className="bg-blue-900/50 rounded-xl p-3 border border-blue-800">
                 <div className="font-extrabold text-yellow-300 mb-1">
                   1단계. 홈택스 메뉴 접속
@@ -149,7 +148,7 @@ export const App: React.FC = () => {
       </header>
 
       {/* 상단 핵심 KPI 4대 요약 카드 */}
-      <section className="max-w-7xl w-full mx-auto px-4 pt-5">
+      <section className="max-w-[1800px] w-full mx-auto px-4 sm:px-6 xl:px-10 pt-5">
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-2xs">
             <div className="text-xs font-semibold text-slate-500">
@@ -209,7 +208,7 @@ export const App: React.FC = () => {
       </section>
 
       {mergeAlert && (
-        <div className="max-w-7xl w-full mx-auto px-4 mt-3">
+        <div className="max-w-[1800px] w-full mx-auto px-4 sm:px-6 xl:px-10 mt-3">
           <div className="bg-amber-50 border border-amber-300 text-amber-900 rounded-xl px-4 py-3 text-xs font-semibold flex items-center justify-between gap-2">
             <span>{mergeAlert}</span>
             <button
@@ -223,18 +222,18 @@ export const App: React.FC = () => {
         </div>
       )}
 
-      {/* 메인 2열 분할 작업 영역 (좌측: 업로드·검증 / 우측: 홈택스 1:1 원클릭 복사기) */}
-      <main className="max-w-7xl w-full mx-auto px-4 py-5 flex-1">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-          {/* 좌측 열 (7/12) */}
-          <div className="lg:col-span-7 space-y-5">
+      {/* 메인 2열 와이드 분할 작업 영역 (좌측 8/12: 업로드·검증 테이블 / 우측 4/12: 홈택스 1:1 원클릭 복사기) */}
+      <main className="max-w-[1800px] w-full mx-auto px-4 sm:px-6 xl:px-10 py-5 flex-1">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* 좌측 열 (8/12) - 좌우 스크롤 없이 모든 컬럼이 한눈에 펼쳐지도록 확장 */}
+          <div className="lg:col-span-7 xl:col-span-8 space-y-5 min-w-0">
             <PdfUploader />
             <BrokerSummaryCards summary={summary} />
             <TradeTable trades={trades} summary={summary} />
           </div>
 
-          {/* 우측 열 (5/12) - 홈택스 1:1 원클릭 복사 패널 */}
-          <div className="lg:col-span-5">
+          {/* 우측 열 (4/12) - 홈택스 1:1 원클릭 복사 패널 */}
+          <div className="lg:col-span-5 xl:col-span-4 min-w-0">
             <HometaxCopyPanel
               summary={summary}
               trades={trades}
