@@ -448,6 +448,9 @@ export function findValidTaxTupleSmart(
               isStandardOrder && rawGain > 0 ? [rawGain, -rawGain] : [rawGain];
 
             for (const gain of gainCandidates) {
+              // 1주 매매 행에서 [주당양도가액, 양도가액(=1주×주당단가), 제비용(0)]이 [sell, buy, gain(0)]으로 오매칭되는 현상 방지
+              if (gain === 0 && Math.abs(sell - buy) <= 1500) continue;
+
               const expectedGain = sell - buy - fees;
               const diff = Math.abs(expectedGain - gain);
 
@@ -546,6 +549,8 @@ export function findValidTaxTupleSmart(
         for (let l = 0; l < n; l++) {
           if (l === i || l === j) continue;
           const gain = nums[l];
+          // 1주 매매 행에서 [주당양도가액, 양도가액, 제비용(0)]이 [sell, buy, gain(0)]으로 오매칭되는 현상 원천 차단
+          if (gain === 0 && Math.abs(sell - buy) <= 1500) continue;
           const diff = Math.abs(sell - buy - gain);
           if (diff <= 1500 && i < l && j < l) {
             return {
@@ -666,7 +671,7 @@ export function findValidTaxTupleSmart(
 }
 
 const TOTAL_KEYWORD_REGEX =
-  /(합\s*[계게례]|총\s*계|총\s*양도|전체\s*합계|TOTAL|계산\s*내역\s*합계|양도가액\s*합|취득가액\s*합)/i;
+  /(합\s*[계게례케메예기]|총\s*계|총\s*양도|전체\s*합계|TOTAL|계산\s*내역\s*합계|양도가액\s*합|취득가액\s*합|양도가액\s*계)/i;
 
 /**
  * 증권사 PDF 텍스트 라인들로부터 개별 거래내역 및 문서 합계 행을 모두 파싱
@@ -800,82 +805,101 @@ export function parseTradesFromLines(
   // - 하나증권/미래에셋: 윗줄(lines[i])에 '합계 / 양도가액계' 헤더가 있고 아랫줄(lines[i+1])에 숫자가 있는 구조
   // - 메리츠증권: 윗줄(lines[i-1])에 [양도가액, 제비용], 가운데(lines[i])에 '합계/합게', 아랫줄(lines[i+1])에 [취득가액, 손익]이 배치된 3줄 구조
   if (!summaryTrade) {
+    let bestMultiLineSummary: {
+      sellAmount: number;
+      buyAmount: number;
+      fees: number;
+      gain: number;
+      lineIdx: number;
+    } | null = null;
+
     for (let i = 0; i < lines.length; i++) {
       if (!TOTAL_KEYWORD_REGEX.test(lines[i])) continue;
 
-      // (A) lines[i] (합계 헤더) + lines[i+1] (숫자 행)
+      const candidateWindows: string[] = [];
       if (i + 1 < lines.length) {
-        const forwardWindow = `${lines[i]} ${lines[i + 1]}`;
-        const tupleFwd = findValidTaxTupleSmart(
-          extractKrwAmounts(forwardWindow),
-          forwardWindow
-        );
-        if (tupleFwd) {
-          const stockInfo =
-            globalTopStock || {
-              symbol: 'NVDA',
-              isin: 'US67066G1040',
-              name: `${broker} 합산 대표종목`,
-            };
-          summaryTrade = {
-            id: `parsed-total-fwd-${Date.now()}-${i}`,
-            broker,
-            symbol: stockInfo.symbol,
-            isin: stockInfo.isin,
-            assetName: `[문서합계] ${stockInfo.name} 외 (${fileName})`,
-            quantity: 1,
-            buyDate: `${taxYear}-01-01`,
-            sellDate: `${taxYear}-12-31`,
-            sellAmountKRW: tupleFwd.sellAmount,
-            buyAmountKRW: tupleFwd.buyAmount,
-            feesKRW: tupleFwd.fees,
-            capitalGainKRW: tupleFwd.gain,
-            sourceFileName: fileName,
-            parseMethod: usedOcr ? 'ocr-vision' : 'pdf-text',
-            rowType: 'summary',
-          };
-          break;
-        }
+        candidateWindows.push(`${lines[i]} ${lines[i + 1]}`);
+      }
+      if (i >= 1 && i + 1 < lines.length) {
+        candidateWindows.push(`${lines[i - 1]} ${lines[i]} ${lines[i + 1]}`);
       }
 
-      // (B) 메리츠증권 등 3줄 중앙 합계 구조: lines[i-1] + lines[i]("합계") + lines[i+1]
-      if (i >= 1 && i + 1 < lines.length) {
-        const centeredWindow = `${lines[i - 1]} ${lines[i]} ${lines[i + 1]}`;
-        const tupleCenter = findValidTaxTupleSmart(
-          extractKrwAmounts(centeredWindow),
-          centeredWindow
-        );
-        if (tupleCenter) {
-          const stockInfo =
-            globalTopStock || {
-              symbol: 'NVDA',
-              isin: 'US67066G1040',
-              name: `${broker} 합산 대표종목`,
-            };
-          summaryTrade = {
-            id: `parsed-total-center-${Date.now()}-${i}`,
-            broker,
-            symbol: stockInfo.symbol,
-            isin: stockInfo.isin,
-            assetName: `[문서합계] ${stockInfo.name} 외 (${fileName})`,
-            quantity: 1,
-            buyDate: `${taxYear}-01-01`,
-            sellDate: `${taxYear}-12-31`,
-            sellAmountKRW: tupleCenter.sellAmount,
-            buyAmountKRW: tupleCenter.buyAmount,
-            feesKRW: tupleCenter.fees,
-            capitalGainKRW: tupleCenter.gain,
-            sourceFileName: fileName,
-            parseMethod: usedOcr ? 'ocr-vision' : 'pdf-text',
-            rowType: 'summary',
-          };
-          break;
+      for (const win of candidateWindows) {
+        const tuple = findValidTaxTupleSmart(extractKrwAmounts(win), win);
+        if (tuple) {
+          if (
+            !bestMultiLineSummary ||
+            tuple.sellAmount > bestMultiLineSummary.sellAmount
+          ) {
+            bestMultiLineSummary = { ...tuple, lineIdx: i };
+          }
         }
       }
     }
+
+    // [메리츠증권 등 전용 안전장치]
+    // 만약 브라우저 OCR에서 3페이지 병합 셀 안의 '합계' 2글자가 흐릿하여 인식되지 않았더라도,
+    // '2. 해외주식 양도소득금액 양도일자별 구분 세부내역' 섹션 진입 직전 2~3줄(ISIN이나 '61' 종목종류코드가 없는 순수 숫자 줄)은
+    // 항상 '1. 종목별 내역'의 마지막 [합계] 블록(54,789,588 / 0 및 52,393,621 / 2,395,967)입니다.
+    if (!bestMultiLineSummary && section1Trades.length === 0) {
+      const sec2HeaderIdx = lines.findIndex((l) =>
+        /2\s*[.,]?\s*해외주식.*양도일자별|양도일자별\s*(구분\s*)?세부내역/.test(l)
+      );
+      if (sec2HeaderIdx >= 2) {
+        const preSec2Lines: string[] = [];
+        for (
+          let k = sec2HeaderIdx - 1;
+          k >= Math.max(0, sec2HeaderIdx - 4);
+          k--
+        ) {
+          const lineK = lines[k].trim();
+          // 개별 종목 줄(ISIN 포함 또는 '61 '로 시작하는 줄)을 만나면 합계 블록 수집 중단
+          if (detectStockFromLine(lineK) || /^(61|ol)\b/i.test(lineK)) {
+            break;
+          }
+          preSec2Lines.unshift(lineK);
+        }
+        if (preSec2Lines.length >= 2) {
+          const preWin = preSec2Lines.join(' ');
+          const tuplePre = findValidTaxTupleSmart(
+            extractKrwAmounts(preWin),
+            preWin
+          );
+          if (tuplePre) {
+            bestMultiLineSummary = { ...tuplePre, lineIdx: sec2HeaderIdx - 1 };
+          }
+        }
+      }
+    }
+
+    if (bestMultiLineSummary) {
+      const stockInfo =
+        globalTopStock || {
+          symbol: 'NVDA',
+          isin: 'US67066G1040',
+          name: `${broker} 합산 대표종목`,
+        };
+      summaryTrade = {
+        id: `parsed-total-multi-${Date.now()}-${bestMultiLineSummary.lineIdx}`,
+        broker,
+        symbol: stockInfo.symbol,
+        isin: stockInfo.isin,
+        assetName: `[문서합계] ${stockInfo.name} 외 (${fileName})`,
+        quantity: 1,
+        buyDate: `${taxYear}-01-01`,
+        sellDate: `${taxYear}-12-31`,
+        sellAmountKRW: bestMultiLineSummary.sellAmount,
+        buyAmountKRW: bestMultiLineSummary.buyAmount,
+        feesKRW: bestMultiLineSummary.fees,
+        capitalGainKRW: bestMultiLineSummary.gain,
+        sourceFileName: fileName,
+        parseMethod: usedOcr ? 'ocr-vision' : 'pdf-text',
+        rowType: 'summary',
+      };
+    }
   }
 
-  // 3단계: 2줄로 나뉜 개별 종목 행 파싱 (메리츠/하나/미래에셋 등 1종목이 2줄로 구성된 표)
+  // 3단계: 2~3줄로 나뉜 개별 종목 행 파싱 (메리츠 3줄 구조 / 하나·미래에셋 2줄 구조)
   let individualTrades = section1Trades.length > 0 ? section1Trades : section2Trades;
   if (individualTrades.length === 0) {
     let inSec2 = false;
@@ -887,31 +911,69 @@ export function parseTradesFromLines(
       if (TOTAL_KEYWORD_REGEX.test(lines[i]) || TOTAL_KEYWORD_REGEX.test(lines[i + 1])) continue;
 
       const combined2 = `${lines[i]} ${lines[i + 1]}`;
-      const st = detectStockFromLine(combined2);
-      if (!st) continue;
-      if (!globalTopStock) globalTopStock = st;
+      const st2 = detectStockFromLine(combined2);
+      if (st2) {
+        if (!globalTopStock) globalTopStock = st2;
+        const tuple2 = findValidTaxTupleSmart(extractKrwAmounts(combined2));
+        if (tuple2) {
+          const { buyDate, sellDate } = extractDates(combined2, taxYear);
+          individualTrades.push({
+            id: `parsed-row2-${Date.now()}-${i}`,
+            broker,
+            symbol: st2.symbol,
+            isin: st2.isin,
+            assetName: st2.name,
+            quantity: 1,
+            buyDate,
+            sellDate,
+            sellAmountKRW: tuple2.sellAmount,
+            buyAmountKRW: tuple2.buyAmount,
+            feesKRW: tuple2.fees,
+            capitalGainKRW: tuple2.gain,
+            sourceFileName: fileName,
+            parseMethod: usedOcr ? 'ocr-vision' : 'pdf-text',
+            rowType: 'individual',
+          });
+          i++;
+          continue;
+        }
+      }
 
-      const tuple2 = findValidTaxTupleSmart(extractKrwAmounts(combined2));
-      if (tuple2) {
-        const { buyDate, sellDate } = extractDates(combined2, taxYear);
-        individualTrades.push({
-          id: `parsed-row2-${Date.now()}-${i}`,
-          broker,
-          symbol: st.symbol,
-          isin: st.isin,
-          assetName: st.name,
-          quantity: 1,
-          buyDate,
-          sellDate,
-          sellAmountKRW: tuple2.sellAmount,
-          buyAmountKRW: tuple2.buyAmount,
-          feesKRW: tuple2.fees,
-          capitalGainKRW: tuple2.gain,
-          sourceFileName: fileName,
-          parseMethod: usedOcr ? 'ocr-vision' : 'pdf-text',
-          rowType: 'individual',
-        });
-        i++;
+      // 메리츠증권 등 3줄 개별 종목 구조: [i: ISIN+양도가액+제비용] + [i+1: 한글종목명] + [i+2: 61+취득가액+손익]
+      if (i + 2 < lines.length && !TOTAL_KEYWORD_REGEX.test(lines[i + 2])) {
+        const stTop = detectStockFromLine(lines[i]);
+        if (stTop && /^(61|ol)\b/i.test(lines[i + 2].trim())) {
+          if (!globalTopStock) globalTopStock = stTop;
+          const combined3 = `${lines[i]} ${lines[i + 1]} ${lines[i + 2]}`;
+          const tuple3 = findValidTaxTupleSmart(extractKrwAmounts(combined3));
+          if (tuple3) {
+            const { buyDate, sellDate } = extractDates(combined3, taxYear);
+            const korName = lines[i + 1].trim();
+            const displayAssetName =
+              korName.length >= 2 && /[가-힣A-Za-z]/.test(korName)
+                ? `${korName} (${stTop.isin})`
+                : stTop.name;
+            individualTrades.push({
+              id: `parsed-row3-${Date.now()}-${i}`,
+              broker,
+              symbol: stTop.symbol,
+              isin: stTop.isin,
+              assetName: displayAssetName,
+              quantity: 1,
+              buyDate,
+              sellDate,
+              sellAmountKRW: tuple3.sellAmount,
+              buyAmountKRW: tuple3.buyAmount,
+              feesKRW: tuple3.fees,
+              capitalGainKRW: tuple3.gain,
+              sourceFileName: fileName,
+              parseMethod: usedOcr ? 'ocr-vision' : 'pdf-text',
+              rowType: 'individual',
+            });
+            i += 2;
+            continue;
+          }
+        }
       }
       void inSec2;
     }
@@ -925,25 +987,27 @@ export function parseTradesFromLines(
     const sumBuy = section1Trades.reduce((a, b) => a + b.buyAmountKRW, 0);
     const sumFees = section1Trades.reduce((a, b) => a + b.feesKRW, 0);
     const sumGain = section1Trades.reduce((a, b) => a + b.capitalGainKRW, 0);
-    const topSt = [...section1Trades].sort((a, b) => b.sellAmountKRW - a.sellAmountKRW)[0];
+    if (sumGain !== 0 || sumSell !== sumBuy) {
+      const topSt = [...section1Trades].sort((a, b) => b.sellAmountKRW - a.sellAmountKRW)[0];
 
-    summaryTrade = {
-      id: `parsed-sec1-sum-${Date.now()}`,
-      broker,
-      symbol: topSt.symbol,
-      isin: topSt.isin,
-      assetName: `[문서합계] ${topSt.assetName} 외 (${fileName})`,
-      quantity: 1,
-      buyDate: `${taxYear}-01-01`,
-      sellDate: `${taxYear}-12-31`,
-      sellAmountKRW: sumSell,
-      buyAmountKRW: sumBuy,
-      feesKRW: sumFees,
-      capitalGainKRW: sumGain,
-      sourceFileName: fileName,
-      parseMethod: usedOcr ? 'ocr-vision' : 'pdf-text',
-      rowType: 'summary',
-    };
+      summaryTrade = {
+        id: `parsed-sec1-sum-${Date.now()}`,
+        broker,
+        symbol: topSt.symbol,
+        isin: topSt.isin,
+        assetName: `[문서합계] ${topSt.assetName} 외 (${fileName})`,
+        quantity: 1,
+        buyDate: `${taxYear}-01-01`,
+        sellDate: `${taxYear}-12-31`,
+        sellAmountKRW: sumSell,
+        buyAmountKRW: sumBuy,
+        feesKRW: sumFees,
+        capitalGainKRW: sumGain,
+        sourceFileName: fileName,
+        parseMethod: usedOcr ? 'ocr-vision' : 'pdf-text',
+        rowType: 'summary',
+      };
+    }
   }
 
   // 대표종목(양도가액 최대 종목)으로 summaryTrade의 ISIN/종목명 보강
