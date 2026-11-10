@@ -2,6 +2,10 @@
 > **Overseas Stock Capital Gains Tax Calculator & HomeTax 1-Click Copy Helper**  
 > 복수 증권사(키움·토스·미래에셋·한투·삼성 등) 해외주식 거래내역 PDF를 올리면 브라우저에서 자동 파싱하고 손익을 통산하여, **국세청 홈택스 확정신고 팝업창 순서 그대로 원클릭 복사(Ctrl+C -> Ctrl+V)**할 수 있도록 도와주는 웹 애플리케이션입니다.
 
+🌐 **웹 서비스 바로가기 (GitHub Pages 배포 주소)**  
+👉 **[https://unihit.github.io/overseas-stock-tax-helper/](https://unihit.github.io/overseas-stock-tax-helper/)**  
+*(별도 설치나 회원가입 없이 브라우저에서 즉시 실행됩니다)*
+
 ---
 
 ## 🔒 개인정보 보안 안심 원칙 (Zero-Server / Client-Side Only)
