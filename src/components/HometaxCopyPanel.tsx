@@ -185,7 +185,7 @@ export const HometaxCopyPanel: React.FC<HometaxCopyPanelProps> = ({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  });
+  }, [activeCopyStepIndex, copySteps, isStandaloneWindow, onClose, setActiveCopyStepIndex]);
 
   const handleSequentialCopy = () => {
     const currentStep = copySteps[activeCopyStepIndex] || copySteps[0];

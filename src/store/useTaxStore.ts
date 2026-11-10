@@ -32,6 +32,7 @@ interface TaxState {
   loadSampleMultiBrokerData: () => void;
 
   addOrUpdateFile: (file: UploadedPdfFile) => void;
+  toggleFileTradeMode: (fileId: string) => void;
   removeFile: (fileId: string, fileName: string) => void;
 }
 
@@ -108,7 +109,84 @@ const syncChannel =
     ? new BroadcastChannel('overseas_stock_tax_popup_sync')
     : null;
 
+const SESSION_STORAGE_KEY = 'overseas_stock_tax_session_v1';
+
+const DEFAULT_SAMPLE_FILES: UploadedPdfFile[] = [
+  {
+    id: 'sample-file-1',
+    name: '키움증권_해외주식양도소득세_계산보조자료_2025.pdf (예시)',
+    size: 148200,
+    detectedBroker: '키움증권',
+    status: 'completed',
+    progress: 100,
+    extractedCount: 2,
+    totalGainKRW: 42670000,
+    message: '합계 및 종목 내역 2건 자동 추출 완료',
+  },
+  {
+    id: 'sample-file-2',
+    name: '토스증권_해외주식양도세_거래내역서_2025.pdf (예시)',
+    size: 94500,
+    detectedBroker: '토스증권',
+    status: 'completed',
+    progress: 100,
+    extractedCount: 1,
+    totalGainKRW: -8762000,
+    message: '손실상계 대상 (-8,762,000원) 추출 완료',
+  },
+  {
+    id: 'sample-file-3',
+    name: '미래에셋증권_해외주식_양도소득금액계산명세서.pdf (예시)',
+    size: 112400,
+    detectedBroker: '미래에셋증권',
+    status: 'completed',
+    progress: 100,
+    extractedCount: 1,
+    totalGainKRW: 6532000,
+    message: '합계 내역 1건 추출 완료',
+  },
+];
+
+function loadTabSessionState(): Partial<TaxState> | null {
+  try {
+    if (typeof window === 'undefined' || !window.sessionStorage) return null;
+    const raw = window.sessionStorage.getItem(SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && Array.isArray(parsed.trades) && Array.isArray(parsed.uploadedFiles)) {
+      return parsed;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function saveTabSessionState(state: Partial<TaxState>) {
+  try {
+    if (typeof window === 'undefined' || !window.sessionStorage) return;
+    const serializableFiles = (state.uploadedFiles || []).map((f) => {
+      const { rawBuffer: _omitted, ...rest } = f;
+      void _omitted;
+      return rest;
+    });
+    window.sessionStorage.setItem(
+      SESSION_STORAGE_KEY,
+      JSON.stringify({
+        taxYear: state.taxYear,
+        trades: state.trades,
+        uploadedFiles: serializableFiles,
+        stripCommasOnCopy: state.stripCommasOnCopy,
+        customRepIsin: state.customRepIsin,
+      })
+    );
+  } catch {
+    // ignore
+  }
+}
+
 function broadcastState(state: Partial<TaxState>) {
+  saveTabSessionState(state);
   try {
     syncChannel?.postMessage({
       type: 'SYNC_STATE',
@@ -124,46 +202,14 @@ function broadcastState(state: Partial<TaxState>) {
   }
 }
 
+const restoredSession = loadTabSessionState();
+
 export const useTaxStore = create<TaxState>((set, get) => ({
-  taxYear: 2025,
-  trades: INITIAL_SAMPLE_TRADES,
-  uploadedFiles: [
-    {
-      id: 'sample-file-1',
-      name: '키움증권_해외주식양도소득세_계산보조자료_2025.pdf (예시)',
-      size: 148200,
-      detectedBroker: '키움증권',
-      status: 'completed',
-      progress: 100,
-      extractedCount: 2,
-      totalGainKRW: 42670000,
-      message: '합계 및 종목 내역 2건 자동 추출 완료',
-    },
-    {
-      id: 'sample-file-2',
-      name: '토스증권_해외주식양도세_거래내역서_2025.pdf (예시)',
-      size: 94500,
-      detectedBroker: '토스증권',
-      status: 'completed',
-      progress: 100,
-      extractedCount: 1,
-      totalGainKRW: -8762000,
-      message: '손실상계 대상 (-8,762,000원) 추출 완료',
-    },
-    {
-      id: 'sample-file-3',
-      name: '미래에셋증권_해외주식_양도소득금액계산명세서.pdf (예시)',
-      size: 112400,
-      detectedBroker: '미래에셋증권',
-      status: 'completed',
-      progress: 100,
-      extractedCount: 1,
-      totalGainKRW: 6532000,
-      message: '합계 내역 1건 추출 완료',
-    },
-  ],
-  stripCommasOnCopy: true,
-  customRepIsin: null,
+  taxYear: restoredSession?.taxYear ?? 2025,
+  trades: restoredSession?.trades ?? INITIAL_SAMPLE_TRADES,
+  uploadedFiles: restoredSession?.uploadedFiles ?? DEFAULT_SAMPLE_FILES,
+  stripCommasOnCopy: restoredSession?.stripCommasOnCopy ?? true,
+  customRepIsin: restoredSession?.customRepIsin ?? null,
   activeCopyStepIndex: 0,
   lastCopiedFieldId: null,
 
@@ -258,6 +304,11 @@ export const useTaxStore = create<TaxState>((set, get) => ({
   },
 
   clearAll: () => {
+    try {
+      window.sessionStorage?.removeItem(SESSION_STORAGE_KEY);
+    } catch {
+      // ignore
+    }
     set({
       trades: [],
       uploadedFiles: [],
@@ -270,48 +321,14 @@ export const useTaxStore = create<TaxState>((set, get) => ({
   loadSampleMultiBrokerData: () => {
     set({
       trades: INITIAL_SAMPLE_TRADES,
-      uploadedFiles: [
-        {
-          id: 'sample-file-1',
-          name: '키움증권_해외주식양도소득세_계산보조자료_2025.pdf (예시)',
-          size: 148200,
-          detectedBroker: '키움증권',
-          status: 'completed',
-          progress: 100,
-          extractedCount: 2,
-          totalGainKRW: 42670000,
-          message: '합계 및 종목 내역 2건 자동 추출 완료',
-        },
-        {
-          id: 'sample-file-2',
-          name: '토스증권_해외주식양도세_거래내역서_2025.pdf (예시)',
-          size: 94500,
-          detectedBroker: '토스증권',
-          status: 'completed',
-          progress: 100,
-          extractedCount: 1,
-          totalGainKRW: -8762000,
-          message: '손실상계 대상 (-8,762,000원) 추출 완료',
-        },
-        {
-          id: 'sample-file-3',
-          name: '미래에셋증권_해외주식_양도소득금액계산명세서.pdf (예시)',
-          size: 112400,
-          detectedBroker: '미래에셋증권',
-          status: 'completed',
-          progress: 100,
-          extractedCount: 1,
-          totalGainKRW: 6532000,
-          message: '합계 내역 1건 추출 완료',
-        },
-      ],
+      uploadedFiles: DEFAULT_SAMPLE_FILES,
       customRepIsin: null,
       activeCopyStepIndex: 0,
     });
     broadcastState(get());
   },
 
-  addOrUpdateFile: (file) =>
+  addOrUpdateFile: (file) => {
     set((state) => {
       const cleaned = state.uploadedFiles.filter((f) => !f.id.startsWith('sample-file-'));
       const exists = cleaned.some((f) => f.id === file.id);
@@ -320,12 +337,72 @@ export const useTaxStore = create<TaxState>((set, get) => ({
           ? cleaned.map((f) => (f.id === file.id ? file : f))
           : [...cleaned, file],
       };
-    }),
+    });
+    saveTabSessionState(get());
+  },
+
+  toggleFileTradeMode: (fileId) => {
+    set((state) => {
+      const targetFile = state.uploadedFiles.find((f) => f.id === fileId);
+      if (
+        !targetFile ||
+        !targetFile.summaryTrade ||
+        !targetFile.individualTrades ||
+        targetFile.individualTrades.length === 0
+      ) {
+        return state;
+      }
+
+      const nextMode: 'summary' | 'individual' =
+        targetFile.activeMode === 'summary' ? 'individual' : 'summary';
+      const replacementTrades =
+        nextMode === 'summary'
+          ? [{ ...targetFile.summaryTrade, sourceFileId: fileId }]
+          : targetFile.individualTrades.map((t) => ({ ...t, sourceFileId: fileId }));
+
+      const nextTotalGain = replacementTrades.reduce(
+        (acc, t) => acc + t.capitalGainKRW,
+        0
+      );
+
+      // 기존 테이블에서 이 파일의 행 위치를 찾아 교체
+      const filteredTrades = state.trades.filter(
+        (t) =>
+          t.sourceFileId !== fileId &&
+          !(!t.sourceFileId && t.sourceFileName === targetFile.name)
+      );
+
+      const updatedFiles = state.uploadedFiles.map((f) =>
+        f.id === fileId
+          ? {
+              ...f,
+              activeMode: nextMode,
+              extractedCount: replacementTrades.length,
+              totalGainKRW: nextTotalGain,
+              message:
+                nextMode === 'summary'
+                  ? `연간 문서합계 1건 반영 중 (세부 종목 ${targetFile.individualTrades!.length}건 보유)`
+                  : `종목별 세부내역 ${replacementTrades.length}건 개별 반영 중`,
+            }
+          : f
+      );
+
+      return {
+        trades: [...filteredTrades, ...replacementTrades],
+        uploadedFiles: updatedFiles,
+      };
+    });
+    broadcastState(get());
+  },
 
   removeFile: (fileId, fileName) => {
     set((state) => ({
       uploadedFiles: state.uploadedFiles.filter((f) => f.id !== fileId),
-      trades: state.trades.filter((t) => t.sourceFileName !== fileName),
+      trades: state.trades.filter(
+        (t) =>
+          t.sourceFileId !== fileId &&
+          !(!t.sourceFileId && t.sourceFileName === fileName)
+      ),
     }));
     broadcastState(get());
   },

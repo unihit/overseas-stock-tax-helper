@@ -41,6 +41,8 @@ export function detectBroker(fileName: string, fullText: string): BrokerType {
   if (fnUpper.includes('KB')) return 'KB증권';
   if (fnUpper.includes('메리츠') || fnUpper.includes('MERITZ')) return '메리츠증권';
   if (fnUpper.includes('하나') || fnUpper.includes('HANA')) return '하나증권';
+  if (fnUpper.includes('신한') || fnUpper.includes('SHINHAN')) return '신한투자증권';
+  if (fnUpper.includes('대신') || fnUpper.includes('크레온') || fnUpper.includes('DAISHIN')) return '대신증권(크레온)';
 
   // 2순위: 본문 내 금융기관 사업자등록번호 및 기관명 매칭
   const textUpper = fullText.toUpperCase();
@@ -58,7 +60,11 @@ export function detectBroker(fileName: string, fullText: string): BrokerType {
   ) {
     return '미래에셋증권';
   }
-  if (textUpper.includes('한국투자증권') || textUpper.includes('116-81-04509')) {
+  if (
+    textUpper.includes('한국투자증권') ||
+    textUpper.includes('한국투자') ||
+    textUpper.includes('116-81-04509')
+  ) {
     return '한국투자증권';
   }
   if (
@@ -69,7 +75,11 @@ export function detectBroker(fileName: string, fullText: string): BrokerType {
   ) {
     return '삼성증권';
   }
-  if (textUpper.includes('NH투자증권') || textUpper.includes('116-81-03693')) {
+  if (
+    textUpper.includes('NH투자증권') ||
+    textUpper.includes('나무증권') ||
+    textUpper.includes('116-81-03693')
+  ) {
     return 'NH투자증권(나무)';
   }
   if (
@@ -89,6 +99,20 @@ export function detectBroker(fileName: string, fullText: string): BrokerType {
     textUpper.includes('아나증권')
   ) {
     return '하나증권';
+  }
+  if (
+    textUpper.includes('116-81-36684') ||
+    textUpper.includes('신한투자증권') ||
+    textUpper.includes('신한금융투자')
+  ) {
+    return '신한투자증권';
+  }
+  if (
+    textUpper.includes('116-81-06506') ||
+    textUpper.includes('대신증권') ||
+    textUpper.includes('크레온')
+  ) {
+    return '대신증권(크레온)';
   }
 
   return '직접입력/기타';
@@ -288,6 +312,31 @@ async function runLocalOcrOnPdf(
         .map((l) => maskSensitiveInfo(l.trim()))
         .filter(Boolean);
       ocrLines.push(...lines);
+
+      // [OCR 조기 종료(Early Exit) 최적화]
+      // 현재 페이지까지 읽었을 때 이미 '2. 해외주식 양도소득금액 양도일자별 세부내역' 섹션 진입 헤더가 등장했고,
+      // '1. 종목별 내역'의 연간 문서 합계(summaryTrade)까지 추출 완료되었다면 뒤쪽 페이지(일자별 중복 내역/약관) OCR을 생략하여 속도를 50~70% 단축!
+      if (pageNum < maxPages) {
+        const hasSec2Header = ocrLines.some((l) =>
+          /2\s*[.,]?\s*해외주식.*양도일자별|양도일자별\s*(구분\s*)?세부내역/.test(l)
+        );
+        if (hasSec2Header) {
+          const preview = parseTradesFromLines(
+            ocrLines,
+            '직접입력/기타',
+            '',
+            2025,
+            true
+          );
+          if (preview.summaryTrade !== null) {
+            onProgress?.(
+              82,
+              `${pageNum}쪽에서 연간 합계 및 종목별 내역 추출 완료 (하단 중복 페이지 OCR 생략)...`
+            );
+            break;
+          }
+        }
+      }
     }
   }
 
@@ -671,7 +720,60 @@ export function findValidTaxTupleSmart(
 }
 
 const TOTAL_KEYWORD_REGEX =
-  /(합\s*[계게례케메예기]|총\s*계|총\s*양도|전체\s*합계|TOTAL|계산\s*내역\s*합계|양도가액\s*합|취득가액\s*합|양도가액\s*계)/i;
+  /(합\s*[계게례케메예기]|총\s*계|총\s*양도|전체\s*합계|TOTAL|계산\s*내역\s*합계|양도가액\s*합|취득가액\s*합|양도가액\s*계|과세대상\s*양도소득|총\s*양도소득|합계\s*\(\s*원화\s*\))/i;
+
+/**
+ * [소수점 단주 매매(Fractional Share) 전용 보조 탐색기]
+ * 하나증권(알파벳 -16원, 넷플릭스 +26원, 아마존 -141원)이나 메리츠증권(마이크론 +15원, RTX -98원)처럼
+ * 양도차익이 100원 미만이거나 매도가액이 800~999원인 소수점 단주 개별 종목 행을 복원합니다.
+ */
+function findSmallGainTupleForIndividualRow(
+  combinedLine: string,
+  baseNums: number[]
+): { sellAmount: number; buyAmount: number; fees: number; gain: number } | null {
+  // 1) baseNums에 이미 800원 이상인 양도가액/취득가액 후보가 있고, 줄 끝에 1~99원짜리 소액 손익이 있는 경우
+  const tailMatch = combinedLine.trim().match(/([+-△▲▼▽~ㅡ]?\s*\b\d{1,2})\s*$/);
+  if (tailMatch && baseNums.length >= 2) {
+    const rawTail = tailMatch[1].replace(/[△▲▼▽~ㅡ\s]/g, '-').replace(/--+/g, '-');
+    const tailGain = parseInt(rawTail, 10);
+    if (!isNaN(tailGain) && tailGain !== 0 && Math.abs(tailGain) < 100) {
+      for (let i = 0; i < baseNums.length; i++) {
+        for (let j = 0; j < baseNums.length; j++) {
+          if (i === j) continue;
+          const sell = baseNums[i];
+          const buy = baseNums[j];
+          if (sell < 800 || buy < 800) continue;
+          const impliedGain = sell - buy;
+          if (
+            impliedGain === tailGain ||
+            (tailGain > 0 && impliedGain === -tailGain)
+          ) {
+            return { sellAmount: sell, buyAmount: buy, fees: 0, gain: impliedGain };
+          }
+        }
+      }
+    }
+  }
+
+  // 2) 양도가액 또는 취득가액 중 하나가 500~999원(예: 하나증권 아마존 889원 - 1,030원 = -141원)인 경우
+  for (let i = 0; i < baseNums.length; i++) {
+    for (let j = 0; j < baseNums.length; j++) {
+      if (i === j) continue;
+      const sell = baseNums[i];
+      const buy = baseNums[j];
+      if (sell < 500 || buy < 500) continue;
+      for (let l = 0; l < baseNums.length; l++) {
+        if (l === i || l === j) continue;
+        const gain = baseNums[l];
+        if (gain !== 0 && sell - buy === gain && i < l && j < l) {
+          return { sellAmount: sell, buyAmount: buy, fees: 0, gain };
+        }
+      }
+    }
+  }
+
+  return null;
+}
 
 /**
  * 증권사 PDF 텍스트 라인들로부터 개별 거래내역 및 문서 합계 행을 모두 파싱
@@ -681,7 +783,8 @@ export function parseTradesFromLines(
   broker: BrokerType,
   fileName: string,
   taxYear: number,
-  usedOcr: boolean
+  usedOcr: boolean,
+  fileId?: string
 ): {
   individualTrades: TradeRecord[];
   summaryTrade: TradeRecord | null;
@@ -914,7 +1017,10 @@ export function parseTradesFromLines(
       const st2 = detectStockFromLine(combined2);
       if (st2) {
         if (!globalTopStock) globalTopStock = st2;
-        const tuple2 = findValidTaxTupleSmart(extractKrwAmounts(combined2));
+        const amounts2 = extractKrwAmounts(combined2);
+        const tuple2 =
+          findValidTaxTupleSmart(amounts2) ||
+          findSmallGainTupleForIndividualRow(combined2, amounts2);
         if (tuple2) {
           const { buyDate, sellDate } = extractDates(combined2, taxYear);
           individualTrades.push({
@@ -930,6 +1036,7 @@ export function parseTradesFromLines(
             buyAmountKRW: tuple2.buyAmount,
             feesKRW: tuple2.fees,
             capitalGainKRW: tuple2.gain,
+            sourceFileId: fileId,
             sourceFileName: fileName,
             parseMethod: usedOcr ? 'ocr-vision' : 'pdf-text',
             rowType: 'individual',
@@ -945,7 +1052,10 @@ export function parseTradesFromLines(
         if (stTop && /^(61|ol)\b/i.test(lines[i + 2].trim())) {
           if (!globalTopStock) globalTopStock = stTop;
           const combined3 = `${lines[i]} ${lines[i + 1]} ${lines[i + 2]}`;
-          const tuple3 = findValidTaxTupleSmart(extractKrwAmounts(combined3));
+          const amounts3 = extractKrwAmounts(combined3);
+          const tuple3 =
+            findValidTaxTupleSmart(amounts3) ||
+            findSmallGainTupleForIndividualRow(combined3, amounts3);
           if (tuple3) {
             const { buyDate, sellDate } = extractDates(combined3, taxYear);
             const korName = lines[i + 1].trim();
@@ -966,6 +1076,7 @@ export function parseTradesFromLines(
               buyAmountKRW: tuple3.buyAmount,
               feesKRW: tuple3.fees,
               capitalGainKRW: tuple3.gain,
+              sourceFileId: fileId,
               sourceFileName: fileName,
               parseMethod: usedOcr ? 'ocr-vision' : 'pdf-text',
               rowType: 'individual',
@@ -1003,6 +1114,7 @@ export function parseTradesFromLines(
         buyAmountKRW: sumBuy,
         feesKRW: sumFees,
         capitalGainKRW: sumGain,
+        sourceFileId: fileId,
         sourceFileName: fileName,
         parseMethod: usedOcr ? 'ocr-vision' : 'pdf-text',
         rowType: 'summary',
@@ -1010,16 +1122,22 @@ export function parseTradesFromLines(
     }
   }
 
-  // 대표종목(양도가액 최대 종목)으로 summaryTrade의 ISIN/종목명 보강
-  if (summaryTrade && individualTrades.length > 0) {
-    const topIndividual = [...individualTrades].sort(
-      (a, b) => b.sellAmountKRW - a.sellAmountKRW
-    )[0];
-    if (topIndividual) {
-      summaryTrade.symbol = topIndividual.symbol;
-      summaryTrade.isin = topIndividual.isin;
-      summaryTrade.assetName = `[문서합계] ${topIndividual.assetName} 외 (${fileName})`;
+  // 대표종목(양도가액 최대 종목)으로 summaryTrade의 ISIN/종목명 보강 및 sourceFileId 주입
+  if (summaryTrade) {
+    summaryTrade.sourceFileId = fileId;
+    if (individualTrades.length > 0) {
+      const topIndividual = [...individualTrades].sort(
+        (a, b) => b.sellAmountKRW - a.sellAmountKRW
+      )[0];
+      if (topIndividual) {
+        summaryTrade.symbol = topIndividual.symbol;
+        summaryTrade.isin = topIndividual.isin;
+        summaryTrade.assetName = `[문서합계] ${topIndividual.assetName} 외 (${fileName})`;
+      }
     }
+  }
+  for (const tr of individualTrades) {
+    tr.sourceFileId = fileId;
   }
 
   return { individualTrades, summaryTrade };
@@ -1031,7 +1149,8 @@ export function parseTradesFromLines(
 export async function parseBrokerPdfInBrowser(
   file: File,
   taxYear: number,
-  onProgress?: (progress: number, message: string) => void
+  onProgress?: (progress: number, message: string) => void,
+  fileId?: string
 ): Promise<{ result: ParsedPdfResult; buffer: ArrayBuffer }> {
   onProgress?.(10, '브라우저 메모리에서 PDF 로드 중...');
   const arrayBuffer = await file.arrayBuffer();
@@ -1059,7 +1178,8 @@ export async function parseBrokerPdfInBrowser(
     detectedBroker,
     file.name,
     taxYear,
-    usedOcr
+    usedOcr,
+    fileId
   );
 
   // [핵심 개선] 홈택스 합계액 신고 정확도를 위해 '문서 합계(summaryTrade)'가 존재하면

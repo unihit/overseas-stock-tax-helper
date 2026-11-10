@@ -1,7 +1,6 @@
 import React, { useRef, useState } from 'react';
 import {
   UploadCloud,
-  FileText,
   CheckCircle2,
   AlertTriangle,
   Loader2,
@@ -9,11 +8,15 @@ import {
   Download,
   Sparkles,
   ScanText,
+  ArrowLeftRight,
+  Eye,
+  X,
+  Search,
 } from 'lucide-react';
 import { useTaxStore } from '../store/useTaxStore';
 import { parseBrokerPdfInBrowser } from '../utils/pdfParser';
 import { downloadSampleBrokerPdf } from '../utils/pdfTools';
-import { BrokerType } from '../types/tax';
+import { BrokerType, UploadedPdfFile } from '../types/tax';
 
 const BROKER_BADGE_STYLE: Record<BrokerType, string> = {
   키움증권: 'bg-pink-100 text-pink-800 border-pink-200',
@@ -25,6 +28,8 @@ const BROKER_BADGE_STYLE: Record<BrokerType, string> = {
   KB증권: 'bg-amber-100 text-amber-800 border-amber-200',
   메리츠증권: 'bg-red-100 text-red-800 border-red-200',
   하나증권: 'bg-teal-100 text-teal-800 border-teal-200',
+  신한투자증권: 'bg-cyan-100 text-cyan-800 border-cyan-200',
+  '대신증권(크레온)': 'bg-lime-100 text-lime-800 border-lime-200',
   '직접입력/기타': 'bg-slate-100 text-slate-800 border-slate-200',
 };
 
@@ -33,6 +38,7 @@ export const PdfUploader: React.FC = () => {
     taxYear,
     uploadedFiles,
     addOrUpdateFile,
+    toggleFileTradeMode,
     removeFile,
     addTrades,
     loadSampleMultiBrokerData,
@@ -40,6 +46,8 @@ export const PdfUploader: React.FC = () => {
   } = useTaxStore();
 
   const [isDragging, setIsDragging] = useState(false);
+  const [inspectingFile, setInspectingFile] = useState<UploadedPdfFile | null>(null);
+  const [rawSearchQuery, setRawSearchQuery] = useState('');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleFilesSelected = async (fileList: FileList | null) => {
@@ -77,7 +85,8 @@ export const PdfUploader: React.FC = () => {
               totalGainKRW: 0,
               message,
             });
-          }
+          },
+          fileId
         );
 
         const totalGain = result.trades.reduce((acc, t) => acc + t.capitalGainKRW, 0);
@@ -161,6 +170,7 @@ export const PdfUploader: React.FC = () => {
               buyAmountKRW: 0,
               feesKRW: 0,
               capitalGainKRW: 0,
+              sourceFileId: fileId,
               sourceFileName: file.name,
               parseMethod: 'manual',
               hasWarning: true,
@@ -177,6 +187,7 @@ export const PdfUploader: React.FC = () => {
             extractedCount: 1,
             totalGainKRW: 0,
             rawBuffer: buffer,
+            rawLines: result.rawLines,
             message:
               '비표준 양식 감지: 아래 테이블에 추가된 행에 PDF의 [합계] 금액을 직접 입력해 주세요.',
           });
@@ -209,7 +220,7 @@ export const PdfUploader: React.FC = () => {
             <span>1. 증권사 해외주식 양도소득세 PDF 다중 업로드</span>
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            키움·토스·미래에셋·한투·삼성·NH·KB 등 여러 증권사 PDF를 한 번에 드래그하세요 (자동 손익통산)
+            키움·토스·미래에셋·한투·삼성·NH·KB·메리츠·하나·신한·대신 등 여러 증권사 PDF를 한 번에 드래그하세요 (자동 손익통산)
           </p>
         </div>
 
@@ -302,66 +313,192 @@ export const PdfUploader: React.FC = () => {
           </div>
 
           <div className="grid grid-cols-1 gap-2">
-            {uploadedFiles.map((file) => (
-              <div
-                key={file.id}
-                className="flex items-center justify-between gap-3 p-3 rounded-xl border border-slate-200 bg-slate-50/70 text-xs"
-              >
-                <div className="flex items-center gap-2.5 min-w-0">
-                  {file.status === 'parsing' || file.status === 'ocr-running' ? (
-                    <Loader2 className="w-4 h-4 text-blue-600 animate-spin shrink-0" />
-                  ) : file.status === 'completed' ? (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  ) : (
-                    <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
-                  )}
+            {uploadedFiles.map((file) => {
+              const canToggleMode =
+                !file.isDuplicateSplit &&
+                file.summaryTrade &&
+                file.individualTrades &&
+                file.individualTrades.length > 0;
+              const hasRawLines = file.rawLines && file.rawLines.length > 0;
 
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span
-                        className={`px-2 py-0.5 rounded-md text-[11px] font-bold border ${
-                          BROKER_BADGE_STYLE[file.detectedBroker]
-                        }`}
-                      >
-                        {file.detectedBroker}
-                      </span>
-                      <span className="font-semibold text-slate-800 truncate">{file.name}</span>
+              return (
+                <div
+                  key={file.id}
+                  className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-3 p-3 rounded-xl border border-slate-200 bg-slate-50/70 text-xs"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                    {file.status === 'parsing' || file.status === 'ocr-running' ? (
+                      <Loader2 className="w-4 h-4 text-blue-600 animate-spin shrink-0" />
+                    ) : file.status === 'completed' ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    ) : (
+                      <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+                    )}
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span
+                          className={`px-2 py-0.5 rounded-md text-[11px] font-bold border ${
+                            BROKER_BADGE_STYLE[file.detectedBroker]
+                          }`}
+                        >
+                          {file.detectedBroker}
+                        </span>
+                        <span className="font-semibold text-slate-800 truncate">{file.name}</span>
+
+                        {canToggleMode && (
+                          <button
+                            type="button"
+                            onClick={() => toggleFileTradeMode(file.id)}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-white hover:bg-blue-50 text-blue-700 border border-blue-200 transition cursor-pointer"
+                            title="문서 전체 합계(1건) 반영 모드와 종목별 개별 내역(N건) 반영 모드를 전환합니다"
+                          >
+                            <ArrowLeftRight className="w-3 h-3" />
+                            <span>
+                              {file.activeMode === 'summary'
+                                ? `종목별 ${file.individualTrades!.length}건으로 보기`
+                                : '문서합계 1건으로 전환'}
+                            </span>
+                          </button>
+                        )}
+
+                        {hasRawLines && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setInspectingFile(file);
+                              setRawSearchQuery('');
+                            }}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 transition cursor-pointer"
+                            title="PDF에서 추출된 원본 텍스트/OCR 줄 내역을 대조합니다"
+                          >
+                            <Eye className="w-3 h-3" />
+                            <span>원문 대조</span>
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5">{file.message}</p>
                     </div>
-                    <p className="text-[11px] text-slate-500 mt-0.5">{file.message}</p>
+                  </div>
+
+                  <div className="flex items-center gap-3 shrink-0 ml-auto">
+                    {file.status === 'completed' && (
+                      <div className="text-right">
+                        <div className="text-[11px] text-slate-400">
+                          {file.isDuplicateSplit ? '중복 합산 제외 (분할문서)' : '추출 손익'}
+                        </div>
+                        <div
+                          className={`font-bold font-mono ${
+                            file.isDuplicateSplit
+                              ? 'text-slate-400 line-through'
+                              : file.totalGainKRW >= 0
+                              ? 'text-rose-600'
+                              : 'text-blue-600'
+                          }`}
+                        >
+                          {file.totalGainKRW >= 0 ? '+' : ''}
+                          {file.totalGainKRW.toLocaleString('ko-KR')}원
+                        </div>
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => removeFile(file.id, file.name.replace(' (예시)', ''))}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
+                      title="이 문서 내역 제외"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </div>
                 </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
-                <div className="flex items-center gap-3 shrink-0">
-                  {file.status === 'completed' && (
-                    <div className="text-right">
-                      <div className="text-[11px] text-slate-400">
-                        {file.isDuplicateSplit ? '중복 합산 제외 (분할문서)' : '추출 손익'}
-                      </div>
-                      <div
-                        className={`font-bold font-mono ${
-                          file.isDuplicateSplit
-                            ? 'text-slate-400 line-through'
-                            : file.totalGainKRW >= 0
-                            ? 'text-rose-600'
-                            : 'text-blue-600'
-                        }`}
-                      >
-                        {file.totalGainKRW >= 0 ? '+' : ''}
-                        {file.totalGainKRW.toLocaleString('ko-KR')}원
-                      </div>
-                    </div>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => removeFile(file.id, file.name.replace(' (예시)', ''))}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
-                    title="이 문서 내역 제외"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+      {/* OCR / 텍스트 추출 원문 대조 모달 */}
+      {inspectingFile && inspectingFile.rawLines && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setInspectingFile(null)}
+        >
+          <div
+            className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-3xl max-h-[82vh] flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-3.5 bg-slate-900 text-white flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold px-2 py-0.5 rounded bg-blue-600 text-white">
+                    {inspectingFile.detectedBroker}
+                  </span>
+                  <h3 className="text-sm font-bold truncate">
+                    {inspectingFile.name} — 추출 원문 대조 ({inspectingFile.rawLines.length}줄)
+                  </h3>
                 </div>
+                <p className="text-[11px] text-slate-300 mt-0.5">
+                  노란색으로 강조된 줄은 합계(TOTAL) 키워드 또는 주요 금액이 감지된 위치입니다. (주민등록번호 등 민감정보는 자동 마스킹됨)
+                </p>
               </div>
-            ))}
+              <button
+                type="button"
+                onClick={() => setInspectingFile(null)}
+                className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-3 bg-slate-100 border-b border-slate-200 flex items-center gap-2">
+              <div className="relative flex-1">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={rawSearchQuery}
+                  onChange={(e) => setRawSearchQuery(e.target.value)}
+                  placeholder="종목명, ISIN 코드, '합계' 또는 금액 검색..."
+                  className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs focus:border-blue-500 focus:outline-none"
+                />
+              </div>
+              {inspectingFile.summaryTrade && (
+                <div className="text-[11px] bg-emerald-50 text-emerald-800 border border-emerald-200 px-2.5 py-1.5 rounded-lg font-mono shrink-0">
+                  합계 손익: {inspectingFile.summaryTrade.capitalGainKRW >= 0 ? '+' : ''}
+                  {inspectingFile.summaryTrade.capitalGainKRW.toLocaleString('ko-KR')}원
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 overflow-y-auto flex-1 font-mono text-xs space-y-1 bg-slate-950 text-slate-200">
+              {inspectingFile.rawLines
+                .map((line, idx) => ({ line, idx: idx + 1 }))
+                .filter(
+                  ({ line }) =>
+                    !rawSearchQuery.trim() ||
+                    line.toLowerCase().includes(rawSearchQuery.trim().toLowerCase())
+                )
+                .map(({ line, idx }) => {
+                  const isTotalHighlight =
+                    /(합\s*[계게례케메예기]|총\s*계|TOTAL|양도가액\s*합|양도가액\s*계)/i.test(
+                      line
+                    );
+                  return (
+                    <div
+                      key={idx}
+                      className={`flex items-start gap-3 px-2 py-1 rounded ${
+                        isTotalHighlight
+                          ? 'bg-amber-500/20 text-amber-200 border border-amber-500/40 font-bold'
+                          : 'hover:bg-white/5'
+                      }`}
+                    >
+                      <span className="text-slate-500 select-none w-8 text-right shrink-0">
+                        {idx}
+                      </span>
+                      <span className="whitespace-pre-wrap break-all">{line}</span>
+                    </div>
+                  );
+                })}
+            </div>
           </div>
         </div>
       )}

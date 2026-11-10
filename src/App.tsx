@@ -85,7 +85,7 @@ export const App: React.FC = () => {
               <ShieldCheck className="w-3.5 h-3.5" /> 100% 로컬 브라우저 처리
             </span>
             <span>
-              🔒 <b>개인정보 안심 보증:</b> 본 서비스는 서버가 없으며, 업로드하신 PDF는 외부로 일체 전송되지 않고 브라우저 메모리에서만 연산된 후 새로고침 시 즉시 파기됩니다.
+              🔒 <b>개인정보 안심 보증:</b> 본 서비스는 서버가 없으며, 업로드하신 PDF는 외부로 일체 전송되지 않고 현재 탭 내에서만 연산된 후 브라우저 탭을 닫으면 즉시 완전 파기됩니다.
             </span>
           </div>
           <span className="text-[11px] text-emerald-400 font-mono hidden sm:inline">

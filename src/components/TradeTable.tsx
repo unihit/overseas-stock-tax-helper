@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Plus,
   Trash2,
@@ -27,8 +27,48 @@ const BROKER_OPTIONS: BrokerType[] = [
   'KB증권',
   '메리츠증권',
   '하나증권',
+  '신한투자증권',
+  '대신증권(크레온)',
   '직접입력/기타',
 ];
+
+/**
+ * 인라인 금액 편집 시 천단위 콤마(,) 재렌더링으로 인해 커서가 맨 끝으로 튀는(Cursor Jump) 현상을 방지하는 입력 컴포넌트
+ */
+const CurrencyInput: React.FC<{
+  value: number;
+  onChangeValue: (val: number) => void;
+  className?: string;
+}> = ({ value, onChangeValue, className }) => {
+  const [isFocused, setIsFocused] = useState(false);
+  const [rawText, setRawText] = useState(String(value));
+
+  useEffect(() => {
+    if (!isFocused) {
+      setRawText(String(value));
+    }
+  }, [value, isFocused]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.target.value;
+    const cleaned = input.replace(/[^0-9]/g, '');
+    setRawText(cleaned);
+    const parsed = parseInt(cleaned, 10);
+    onChangeValue(isNaN(parsed) ? 0 : parsed);
+  };
+
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      value={isFocused ? rawText : value.toLocaleString('ko-KR')}
+      onFocus={() => setIsFocused(true)}
+      onBlur={() => setIsFocused(false)}
+      onChange={handleChange}
+      className={className}
+    />
+  );
+};
 
 export const TradeTable: React.FC<TradeTableProps> = ({
   trades,
@@ -36,12 +76,6 @@ export const TradeTable: React.FC<TradeTableProps> = ({
   onOpenCopyPopup,
 }) => {
   const { updateTrade, deleteTrade, addEmptyTrade } = useTaxStore();
-
-  const parseNumberInput = (val: string): number => {
-    const cleaned = val.replace(/[^0-9-]/g, '');
-    const parsed = parseInt(cleaned, 10);
-    return isNaN(parsed) ? 0 : parsed;
-  };
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
@@ -177,13 +211,10 @@ export const TradeTable: React.FC<TradeTableProps> = ({
 
                     {/* 양도가액 (원) */}
                     <td className="py-3 px-3 align-middle text-right">
-                      <input
-                        type="text"
-                        value={tr.sellAmountKRW.toLocaleString('ko-KR')}
-                        onChange={(e) =>
-                          updateTrade(tr.id, {
-                            sellAmountKRW: parseNumberInput(e.target.value),
-                          })
+                      <CurrencyInput
+                        value={tr.sellAmountKRW}
+                        onChangeValue={(val) =>
+                          updateTrade(tr.id, { sellAmountKRW: val })
                         }
                         className="w-full text-right rounded-lg border border-slate-200 px-3 py-1.5 font-mono font-semibold text-slate-900 focus:border-blue-500 focus:outline-none"
                       />
@@ -191,13 +222,10 @@ export const TradeTable: React.FC<TradeTableProps> = ({
 
                     {/* 취득가액 (원) */}
                     <td className="py-3 px-3 align-middle text-right">
-                      <input
-                        type="text"
-                        value={tr.buyAmountKRW.toLocaleString('ko-KR')}
-                        onChange={(e) =>
-                          updateTrade(tr.id, {
-                            buyAmountKRW: parseNumberInput(e.target.value),
-                          })
+                      <CurrencyInput
+                        value={tr.buyAmountKRW}
+                        onChangeValue={(val) =>
+                          updateTrade(tr.id, { buyAmountKRW: val })
                         }
                         className="w-full text-right rounded-lg border border-slate-200 px-3 py-1.5 font-mono font-semibold text-slate-900 focus:border-blue-500 focus:outline-none"
                       />
@@ -205,13 +233,10 @@ export const TradeTable: React.FC<TradeTableProps> = ({
 
                     {/* 필요경비 (원) */}
                     <td className="py-3 px-3 align-middle text-right">
-                      <input
-                        type="text"
-                        value={tr.feesKRW.toLocaleString('ko-KR')}
-                        onChange={(e) =>
-                          updateTrade(tr.id, {
-                            feesKRW: parseNumberInput(e.target.value),
-                          })
+                      <CurrencyInput
+                        value={tr.feesKRW}
+                        onChangeValue={(val) =>
+                          updateTrade(tr.id, { feesKRW: val })
                         }
                         className="w-full text-right rounded-lg border border-slate-200 px-3 py-1.5 font-mono font-semibold text-slate-700 focus:border-blue-500 focus:outline-none"
                       />

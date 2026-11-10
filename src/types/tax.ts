@@ -8,6 +8,8 @@ export type BrokerType =
   | 'KB증권'
   | '메리츠증권'
   | '하나증권'
+  | '신한투자증권'
+  | '대신증권(크레온)'
   | '직접입력/기타';
 
 export interface TradeRecord {
@@ -23,6 +25,7 @@ export interface TradeRecord {
   buyAmountKRW: number;        // 취득가액 (원화 총합)
   feesKRW: number;             // 필요경비/제비용 (원화 총합)
   capitalGainKRW: number;      // 양도소득금액 (양도가액 - 취득가액 - 필요경비)
+  sourceFileId?: string;       // 추출된 원본 업로드 파일 고유 ID
   sourceFileName?: string;     // 추출된 원본 PDF 파일명
   parseMethod?: 'pdf-text' | 'ocr-vision' | 'manual' | 'sample';
   rowType?: 'individual' | 'summary'; // 개별 종목 행인지 문서 전체 합계 행인지 구분
